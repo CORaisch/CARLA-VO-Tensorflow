@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import zipfile
-import os, sys, signal, time, math
+import os, sys, glob, signal, time, math
 
 # imports for debugging
 from evo.tools import plot
@@ -12,18 +12,21 @@ tf.compat.v1.enable_eager_execution()
 
 
 ###################### config ######################
-DATASET_FILES            = ['sequence_00.zip', 'sequence_01.zip']
-# DATASET_FILES             = ['sequence_00.zip']
+DATASET_FILES             = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
+# DATASET_FILES             = ['tfrec_sequences/sequence_00.zip']
 TFRECORD_COMPRESSION_TYPE = 'ZLIB'
 BATCH_SIZE                = 32
 EPOCHES                   = 5
-SEQ_LEN                   = 2 # TODO SEQ_LEN > 2 need to be validated by observationwise visualization
-T0                        = 0 # NOTE conditions for t0, t1: t0<(seq_len-1) && t1<seq_len && t0 < t1 && t0>=0 && t1>=0 TODO check it when letting the user input it
+SEQ_LEN                   = 2
+T0                        = 0 # NOTE conditions for t0, t1: t0<(seq_len-1) && t1<seq_len && t0 < t1 && t0>=0 && t1>=0
 T1                        = 1
 VALIDATION_SPLIT          = 0.2 # NOTE VALIDATION_SPLIT: number in range [0,1], its the fraction of the training data used for validation
-LOGDIR                    = 'logs/'
-LOGDIR_TB                 = LOGDIR + 'tensorboard'
-LOGDIR_CSV                = LOGDIR + 'csv'
+MODEL_FILE                = 'models/simple_flat__in4_seqlen2_imw196_imh196_out6.h5'
+CHECKPOINT_DIR           = 'checkpoints/'
+CHECKPOINT_FREQ           = 'epoch' # NOTE see https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
+LOG_DIR                    = 'logs/'
+LOGDIR_TB                 = LOG_DIR + 'tensorboard'
+LOGDIR_CSV                = LOG_DIR + 'csv'
 
 
 ###################### debugging tools ######################
@@ -285,7 +288,6 @@ def make_debug_compatible(*records):
     ret = (tuple([parse_image_record(raw_image) for i, raw_image in enumerate(records[0])]), records[1])
     return ret
 
-# TODO implementation is currently wrong (you cannot simply add up t and euler angles!):
 # NOTE combines 6 dof transformations (tx,ty,tz,r,p,y)
 def combine(labels):
     # iterate 1st dim of labels (shape: (n,6)) and add 6 dof values
@@ -382,6 +384,20 @@ def clean_assert(condition, image_files_list, label_files_list):
         cleanup(image_files_list, label_files_list)
         assert(condition) # call assert in order to get typical assert error (lazy code...)
 
+def check_model_layout(model, layernames):
+    # check if number of input layers of model is as expected
+    tmp_input_layers = [ layer for layer in model.layers if isinstance(layer, tf.keras.layers.InputLayer) ]
+    if len(tmp_input_layers) != len(layernames):
+        return False
+    # check if layernames are as expected
+    for lname in layernames:
+        try:
+            model.get_layer(name=lname)
+        except ValueError:
+            print("[ERROR] unexpected layername encounterd at loaded model, ensure to load the correct model and that it was built with the same config as currently set")
+            return False
+    return True
+
 def signal_handler(sig, frame):
     print("\n[INFO] exit on Ctrl+C")
     cleanup_and_exit(image_files, label_files)
@@ -403,7 +419,7 @@ image_files    = [ [] for i in range(len(DATASET_FILES)) ]
 label_files    = [ [] for i in range(len(DATASET_FILES)) ]
 label_list_dbg = dict() # NOTE only used for debugging
 for i_arch in range(len(DATASET_FILES)):
-    arch_prefix      = DATASET_FILES[i_arch].split('/')[-1].split('.')[0] + '_'
+    arch_prefix = DATASET_FILES[i_arch].split('/')[-1].split('.')[0] + '_'
     fz = zipfile.ZipFile(DATASET_FILES[i_arch], 'r')
     # read filenames from archive
     if i_arch == 0:
@@ -470,7 +486,7 @@ for i_arch in range(len(DATASET_FILES)):
     # prepare labels s.t. user can specify between which 2 timepoints within the sequence the rel. pose should be used as label
     # example: SEQ_LEN=4 -> [t0,t1,t2,t3], label_from=[1,2] => use rel. pose from t1 to t2
     clean_assert(SEQ_LEN>=2 and T0<T1 and T0>=0 and T1>0 and T0<(SEQ_LEN-1) and T1<SEQ_LEN, image_files, label_files) # NOTE check if t0,t1,SEQ_LEN are valid
-    observation_labels = [ combine(labels[i+T0 : i+T1, :]) for i in range(num_observations) ] # TODO verify combined labels --> visualize !!!
+    observation_labels = [ combine(labels[i+T0 : i+T1, :]) for i in range(num_observations) ]
     observation_labels = np.array(observation_labels)
     # create tf.data.Dataset object for labels
     ds_labels = tf.data.Dataset.from_tensor_slices(observation_labels)
@@ -568,41 +584,37 @@ print("\tDNN input layer names : {}".format(layernames))
 # cleanup_and_exit(image_files, label_files)
 # ## end DEBUG
 
-## define dummy model
-# generate input layers
-input_layers   = []
-flatten_layers = []
-for layername in layernames:
-    input_layer   = tf.keras.layers.Input(shape=image_shape, name=layername)
-    input_layers.append(input_layer)
-    flatten_layer = tf.keras.layers.Flatten()(input_layer)
-    flatten_layers.append(flatten_layer)
-# concatenate output of all input layers to one flat tensor
-x = tf.keras.layers.concatenate(inputs=flatten_layers)
-# make mlp with 6 outpus for the 6 dof poses
-out = tf.keras.layers.Dense(6, activation='linear')(x) # output layer must have 6 output neurons for the 6 dof poses
-# set and compile model
-model = tf.keras.models.Model(inputs=input_layers, outputs=out)
-model.compile(optimizer='adam', loss='mean_absolute_error')
+## savely load model from config path
+model = tf.keras.models.load_model(MODEL_FILE)
+clean_assert(check_model_layout(model, layernames), image_files, label_files)
 
 ## print model informations
 print("[INFO] information about the DNN model thats going to be trained:")
 model.summary()
 # tf.keras.utils.plot_model(model, to_file='dummy_model.png', show_shapes=True, show_layer_names=True, rankdir='LR') # NOTE install pydot and graphviz for plotting model images
 
-## testwise train the dummy model with the dataset NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
-print("[INFO] training the model, logs will be written to '{}':".format(LOGDIR))
-# add tf.keras.callbacks.TensorBoard callback
+## setup tf.keras callbacks for training loop NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
+print("[INFO] training the model, logs will be written to '{}' and checkpoints to '{}':".format(LOG_DIR, CHECKPOINT_DIR))
+# log tensorboard data NOTE inofs at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
 tb_logger = tf.keras.callbacks.TensorBoard(log_dir=LOGDIR_TB)
 # log into csv file NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/CSVLogger
 csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(LOGDIR_CSV, 'training.log'))
-# train model using keras train loop
+# setup training checkpointing NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
+cpkt_filename = os.path.join(CHECKPOINT_DIR, 'ckpt-'+str(int(time.time()))+'-{epoch:05d}.ckpt')
+checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weigths_only=True, verbose=1, save_freq=CHECKPOINT_FREQ)
+# TODO check usefull options: mode, save_best_only
+
+## beg DEBUG
+# print('###### run_eagerly? ', model.run_eagerly) # TODO check this on cluste
+## end DEBUG
+
+## train model using keras training loop
 if VALIDATION_SPLIT <= 0.0:
     history = model.fit(
         ds_final,
         steps_per_epoch=num_obs_total/BATCH_SIZE,
         epochs=EPOCHES,
-        callbacks=[csv_logger, tb_logger])
+        callbacks=[csv_logger, tb_logger, checkpoint_callback])
 else:
     history = model.fit(
         ds_final_training,
@@ -610,7 +622,13 @@ else:
         validation_steps=num_validation_obs/BATCH_SIZE,
         steps_per_epoch=(num_obs_total-num_validation_obs)/BATCH_SIZE,
         epochs=EPOCHES,
-        callbacks=[csv_logger, tb_logger])
+        callbacks=[csv_logger, tb_logger, checkpoint_callback])
+
+# save final model
+extension = '.' + MODEL_FILE.split('.')[-1]
+final_model_name = MODEL_FILE.split(extension)[0] + '_trained' + extension
+print("[INFO] training done, final model is saved at '{}'".format(final_model_name))
+model.save(final_model_name)
 
 print("[INFO] training loss history:")
 print(history.history['loss'])

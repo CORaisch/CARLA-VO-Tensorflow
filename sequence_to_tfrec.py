@@ -15,8 +15,8 @@ TFRECORD_COMPRESSION_TYPE = 'ZLIB'
 #    CARLA sequences, so for e.g. KITTI inputs. The user can freely specify the names of the input layers in his model.
 DATASET_BASE              = '/home/claudio/Datasets/CARLA'
 INPUTMAP                  = {
-                              'sequence_00/rgb/left/images'   : 'camera_left',
-                              'sequence_00/rgb/right/images'  : 'camera_right',
+                              'sequence_01/rgb/left/images'   : 'camera_left',
+                              'sequence_01/rgb/right/images'  : 'camera_right',
                             }
 
 
