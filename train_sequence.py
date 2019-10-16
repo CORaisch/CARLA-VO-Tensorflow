@@ -3,13 +3,6 @@ import numpy as np
 import zipfile
 import os, sys, glob, signal, time, math
 
-# imports for debugging
-from evo.tools import plot
-
-# setups for testing
-import matplotlib.pyplot as plt
-tf.compat.v1.enable_eager_execution()
-
 
 ###################### config ######################
 DATASET_FILES             = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
@@ -22,11 +15,21 @@ T0                        = 0 # NOTE conditions for t0, t1: t0<(seq_len-1) && t1
 T1                        = 1
 VALIDATION_SPLIT          = 0.2 # NOTE VALIDATION_SPLIT: number in range [0,1], its the fraction of the training data used for validation
 MODEL_FILE                = 'models/simple_flat__in4_seqlen2_imw196_imh196_out6.h5'
-CHECKPOINT_DIR           = 'checkpoints/'
+CHECKPOINT_DIR            = 'checkpoints/'
 CHECKPOINT_FREQ           = 'epoch' # NOTE see https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
-LOG_DIR                    = 'logs/'
+LOG_DIR                   = 'logs/'
 LOGDIR_TB                 = LOG_DIR + 'tensorboard'
 LOGDIR_CSV                = LOG_DIR + 'csv'
+ON_CLUSTER                = False
+
+
+# imports for debugging
+if not ON_CLUSTER:
+    from evo.tools import plot
+    import matplotlib.pyplot as plt
+
+# run eager execution
+tf.compat.v1.enable_eager_execution()
 
 
 ###################### debugging tools ######################
@@ -207,28 +210,31 @@ def make_evo_traj_figures(traj_file_path):
 
 # NOTE set keras_compat=True if tf.dataset is mapped to 'make_keras_compatible', else use keras_compat=False
 def debug_vis(ds_final, labels, layernames, seq_len, image_files, label_files, keras_compat=True):
-    for obs in ds_final:
-        # make figures for trajectory and observations
-        if keras_compat:
-            image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len, image_files, label_files)
-        else:
-            image_data, label = prepare_observations(obs, labels, layernames, seq_len, image_files, label_files)
-        fig_obs = make_observations_figure(image_data, label, seq_len)
-        # create temporary pose file which holds 1) identity and 2) relative pose from label
-        tmp_file_name = '.tmp_label.txt'
-        with open(tmp_file_name, 'w') as f:
-            f.write(mat2string(np.eye(4, dtype=np.float64)) + mat2string(euler2mat(label)))
-        fig_traj, fig_xyz, fig_rpy = make_evo_traj_figures(tmp_file_name)
-        # remove temporary pose file
-        os.remove(tmp_file_name)
-        # add figures to evo::plot_collection instance
-        plot_collection = plot.PlotCollection("evo_traj - trajectory plot")
-        plot_collection.add_figure("observations", fig_obs)
-        plot_collection.add_figure("trajectories", fig_traj)
-        plot_collection.add_figure("xyz_view", fig_xyz)
-        plot_collection.add_figure("rpy_view", fig_rpy)
-        # show all plots in tabbed window
-        show_tabbed_plots(plot_collection)
+    if ON_CLUSTER:
+        print("[NOTE] no support for evo and matplotlib on cluster")
+    else:
+        for obs in ds_final:
+            # make figures for trajectory and observations
+            if keras_compat:
+                image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len, image_files, label_files)
+            else:
+                image_data, label = prepare_observations(obs, labels, layernames, seq_len, image_files, label_files)
+            fig_obs = make_observations_figure(image_data, label, seq_len)
+            # create temporary pose file which holds 1) identity and 2) relative pose from label
+            tmp_file_name = '.tmp_label.txt'
+            with open(tmp_file_name, 'w') as f:
+                f.write(mat2string(np.eye(4, dtype=np.float64)) + mat2string(euler2mat(label)))
+            fig_traj, fig_xyz, fig_rpy = make_evo_traj_figures(tmp_file_name)
+            # remove temporary pose file
+            os.remove(tmp_file_name)
+            # add figures to evo::plot_collection instance
+            plot_collection = plot.PlotCollection("evo_traj - trajectory plot")
+            plot_collection.add_figure("observations", fig_obs)
+            plot_collection.add_figure("trajectories", fig_traj)
+            plot_collection.add_figure("xyz_view", fig_xyz)
+            plot_collection.add_figure("rpy_view", fig_rpy)
+            # show all plots in tabbed window
+            show_tabbed_plots(plot_collection)
 
 # decodes and preprocess raw image
 def preprocess_image(image, shape):
