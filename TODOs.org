@@ -1,10 +1,19 @@
 * Training Scripts
-** TODO add scripts that build and save CNN models s.t. they can be used as input for train sequence
-** TODO train from serialized model instead defining model locally
+** DONE add scripts that build and save CNN models s.t. they can be used as input for train sequence
+   CLOSED: [2019-10-16 Wed 12:53]
+** DONE train from serialized model instead defining model locally
+   CLOSED: [2019-10-16 Wed 12:53]
 *** use 'tf.keras.callbacks.ModelCheckpoint' callback to save model during training and at the end
-** TODO save trained model before ending training script
-** META TODO add TODOs from whiteboard at home
+** DONE save trained model before ending training script
+   CLOSED: [2019-10-16 Wed 12:53]
+** DONE add flag that needs to be activated to allow script running on cluster
+   CLOSED: [2019-10-16 Wed 12:54]
 ** TODO add support for global config file that can be set up once and is passed as single argument to other scripts
 *** use pythons builtin configparser combined with the JSON parser as in: https://stackoverflow.com/questions/335695/lists-in-configparser
+** TODO modularize code
+*** check which functions are used at multiple scripts and put them into util module
+*** put code from main script into functions
+*** maybe make class for dataset pipeline generation
+**** would make it easier to handle global variables like 'image_files' or 'label_files'
 ** TODO support for training on KITTI sequences which can and will be used as Reference
 ** TODO support training of unsupervised models. Since current state-of-the-art research is going in that direction it could be used for comparisons.
