@@ -18,8 +18,6 @@ MODEL_FILE                = 'models/simple_flat__in4_seqlen2_imw196_imh196_out6.
 CHECKPOINT_DIR            = 'checkpoints/'
 CHECKPOINT_FREQ           = 'epoch' # NOTE see https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
 LOG_DIR                   = 'logs/'
-LOGDIR_TB                 = LOG_DIR + 'tensorboard'
-LOGDIR_CSV                = LOG_DIR + 'csv'
 ON_CLUSTER                = False
 
 
@@ -602,9 +600,9 @@ model.summary()
 ## setup tf.keras callbacks for training loop NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
 print("[INFO] training the model, logs will be written to '{}' and checkpoints to '{}':".format(LOG_DIR, CHECKPOINT_DIR))
 # log tensorboard data NOTE inofs at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
-tb_logger = tf.keras.callbacks.TensorBoard(log_dir=LOGDIR_TB)
+tb_logger = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(LOG_DIR, 'tensorboard'))
 # log into csv file NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/CSVLogger
-csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(LOGDIR_CSV, 'training.log'))
+csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(LOG_DIR, 'csv', 'training.log'))
 # setup training checkpointing NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
 cpkt_filename = os.path.join(CHECKPOINT_DIR, 'ckpt-'+str(int(time.time()))+'-{epoch:05d}.ckpt')
 checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weigths_only=True, verbose=1, save_freq=CHECKPOINT_FREQ)

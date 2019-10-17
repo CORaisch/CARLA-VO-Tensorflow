@@ -1,40 +1,52 @@
+## sample call:
+## python sequence_to_tfrec.py sequence_00 /home/claudio/Datasets/CARLA/sequence_00/relative_euler_poses_nulled.txt '/home/claudio/Datasets/CARLA/sequence_00/rgb/left/images=camera_left' '/home/claudio/Datasets/CARLA/sequence_00/rgb/right/images=camera_right' -imc 1 -imw 196 -imh 196
+
+
 import tensorflow as tf
 import numpy as np
 import zipfile
-import os, time
+import os, sys, time, argparse
 
 # setups for testing
 import matplotlib.pyplot as plt
 tf.compat.v1.enable_eager_execution()
 
-###################### config ######################
-IMAGE_CHANNELS            = 1 # 3==RGB | 1==GRAYSCALE
-IMAGE_WIDTH, IMAGE_HEIGHT = 196, 196
-TFRECORD_COMPRESSION_TYPE = 'ZLIB'
-# 2) Pass a dictionary that maps the input paths to the input layers name. This way it is possible to read even non
-#    CARLA sequences, so for e.g. KITTI inputs. The user can freely specify the names of the input layers in his model.
-DATASET_BASE              = '/home/claudio/Datasets/CARLA'
-INPUTMAP                  = {
-                              'sequence_01/rgb/left/images'   : 'camera_left',
-                              'sequence_01/rgb/right/images'  : 'camera_right',
-                            }
-
 
 ###################### helpers ######################
+def parse_args():
+    # create argparse instance
+    argparser = argparse.ArgumentParser(description="converts a sequence to TFRecord files used for training with Tensorflow")
+    # add positional arguments
+    argparser.add_argument('archive_name', type=str, help="name of final archive where all data will be written to")
+    argparser.add_argument('labels', type=str, help="path to labels file")
+    argparser.add_argument('inputmap', type=str, nargs='*', metavar="\'PATH/TO/IMAGES=NAME\'", help="maps all input sequences to the desired name in the archive. The archive name will later be used as name for the inputlayer of the DNN")
+    # add optional arguments
+    argparser.add_argument('--image_channels', '-imc', type=int, default=1, help="1 = images are stored grayscale, 3 = images are stored RGB")
+    argparser.add_argument('--image_width', '-imw', type=int, default=196, help="width of stored images")
+    argparser.add_argument('--image_height', '-imh', type=int, default=196, help="height of stored images")
+    argparser.add_argument('--compression_type', '-compression', type=str, default='ZLIB', metavar="ZLIB|GZIP", help="compression type used for tfrecord files")
+    # parse args
+    args = argparser.parse_args()
+    # convert inputmap to dict
+    args.inputmap = { pair.split('=')[0] : pair.split('=')[1] for pair in args.inputmap }
+    # return parsed arguments
+    return args
+
+
 def _float_feature(value):
-  return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
+    return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
 
 def _bytes_feature(value):
-  return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 def _int64_feature(value):
-  return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 # decodes and preprocess raw image
 def preprocess_image(image, shape):
     # decod raw image
     image = tf.image.decode_image(image, channels=shape[2])
-    # TODO filter images
+    # TODO filter images here
     # resize images
     image = tf.image.resize(image, [shape[0], shape[1]])
     # normalize final image to range [0,1]
@@ -47,10 +59,9 @@ def load_and_preprocess_image(path, shape):
     image = tf.io.read_file(path)
     return preprocess_image(image, shape)
 
-def load_dataset_paths():
-    image_paths, num_images = load_paths_from_dict(INPUTMAP)
+def load_dataset_paths(inputmap, labels_file):
+    image_paths, num_images = load_paths_from_dict(inputmap)
     # load dummy 6 DoF labels for testing
-    labels_file = os.path.join(DATASET_BASE, os.path.join(list(INPUTMAP.keys())[0].split('/')[0], 'relative_euler_poses_nulled.txt'))
     f = open(labels_file, 'r'); lines = f.readlines(); f.close();
     labels = []
     for i, line in enumerate(lines):
@@ -70,7 +81,6 @@ def load_paths_from_dict(inputmap):
     image_paths = dict()
     # iterate inputmap load all subpaths
     for path, name in inputmap.items():
-        path = os.path.join(DATASET_BASE, path)
         paths = [ os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) ]; paths.sort()
         image_paths[name] = np.array(paths)
     # get some useful information about the dataset
@@ -117,26 +127,28 @@ def make_header_record(shape, num_images):
 # force tensorflow to throw its inital messages on the very beginning of that script
 tf.config.experimental_list_devices()
 
+# parse arguemts
+args = parse_args()
+
 # setup image paths of CARLA sequence
-image_paths, labels, num_images = load_dataset_paths()
+image_paths, labels, num_images = load_dataset_paths(args.inputmap, args.labels)
 
 ## write dataset files and zip them into an archive for convenience
 # write each input image class to a tfrecord file
-archive_name = list(INPUTMAP.keys())[0].split('/')[0]
-print("archive name: ", archive_name)
+print("archive name: ", args.archive_name)
 for name, paths in image_paths.items():
     filename = name + '.tfrec'
-    print("[INFO] writing images to TFRecord at \'{0}\' compressing with {1}...".format(filename, TFRECORD_COMPRESSION_TYPE.lower()), end='', flush=True)
-    write_images_to_tfrec(paths, filename, (IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS), archive_name, compression_type=TFRECORD_COMPRESSION_TYPE)
+    print("[INFO] writing images to TFRecord at \'{0}\' compressing with {1}...".format(filename, args.compression_type.lower()), end='', flush=True)
+    write_images_to_tfrec(paths, filename, (args.image_width, args.image_height, args.image_channels), args.archive_name, compression_type=args.compression_type)
     print(" done")
 # 2) write labels to .npy file
 labels_file = 'labels.npz'
-print("[INFO] writing label at \'{0}\'...".format(labels_file), end='', flush=True)
+print("[INFO] writing labels at \'{0}\'...".format(labels_file), end='', flush=True)
 write_labels_to_npz(labels_file, labels)
 print(" done")
 
 # write combined files into zip archive
-archivefilename = archive_name + '.zip'
+archivefilename = args.archive_name + '.zip'
 print("[INFO] combine files into zip archive '{}'...".format(archivefilename), end='', flush=True)
 with zipfile.ZipFile(archivefilename, 'w', zipfile.ZIP_DEFLATED) as zipf:
     filename = 'labels.npz'
