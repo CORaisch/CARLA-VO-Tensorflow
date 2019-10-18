@@ -8,7 +8,11 @@
    CLOSED: [2019-10-16 Wed 12:53]
 ** DONE add flag that needs to be activated to allow script running on cluster
    CLOSED: [2019-10-16 Wed 12:54]
-** TODO add support for global config file that can be set up once and is passed as single argument to other scripts
+** DONE add argparser to 'sequence_to_tfrec.py'
+   CLOSED: [2019-10-17 Thu 22:30]
+** DONE add 'carla_to_tfrec.py' script that wraps 'sequence_to_tfrec.py' but converts CARLA sequences simpler and safer
+   CLOSED: [2019-10-17 Thu 22:32]
+** TODO add support for global config file that can be set up once and is passed as single argument to 'train_sequence.py' and 'model__*.py' scripts
 *** use pythons builtin configparser combined with the JSON parser as in: https://stackoverflow.com/questions/335695/lists-in-configparser
 ** TODO modularize code
 *** check which functions are used at multiple scripts and put them into util module
