@@ -1,16 +1,15 @@
 # script creates simple flat dummy model that takes arbitrary input arguments and has 6 output neurons
 
 import tensorflow as tf
-import os, zipfile
+import os, zipfile, argparse
+import src.config as config
 
-###################### config ######################
-DATASET_FILES            = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
-SEQ_LEN                  = 2
-MODEL_OUT                = 'models'
-IMAGE_SHAPE              = [196, 196, 1]
+def parse_args():
+    argparser = argparse.ArgumentParser(description="This scripts generates a simple flat perceptron for test usages.")
+    argparser.add_argument('config', help="same config file as used for training with 'train_sequence.py'. Config file is required to set the input layers names as 'train_tfrec.py' expects it. Names will be generated from 'DATASET_FILES' option, so ensure to use this option consistently.")
+    argparser.add_argument('--model_out', '-out', default='', help="path to where the model should be saved.")
+    return argparser.parse_args()
 
-
-###################### code ######################
 # NOTE 'arch_file' holds the path to a sequence zip archive
 # NOTE 'seq_len' defines the length of a single observation sequence
 def make_layernames(arch_file, seq_len):
@@ -56,16 +55,19 @@ def create_model(layernames, image_shape):
 
 def main():
     # parse input arguemts
-    layernames = make_layernames(DATASET_FILES[0], SEQ_LEN)
+    args = parse_args()
+    conf = config.Config(args.config)
+    # make header for the DNN
+    layernames = make_layernames(conf.dataset_files[0], conf.seq_len)
     # create and compile model
-    model = create_model(layernames, IMAGE_SHAPE)
+    model = create_model(layernames, conf.image_shape)
     # write model to disk
     name = 'simple_flat__in' + str(len(layernames)) \
-             + '_seqlen' + str(SEQ_LEN) \
-             + '_imw'    + str(IMAGE_SHAPE[0]) \
-             + '_imh'    + str(IMAGE_SHAPE[1]) \
+             + '_seqlen' + str(conf.seq_len) \
+             + '_imw'    + str(conf.image_shape[0]) \
+             + '_imh'    + str(conf.image_shape[1]) \
              + '_out6'   + '.h5'
-    model.save(os.path.join(MODEL_OUT, name))
+    model.save(os.path.join(args.model_out, name))
 
 if __name__=="__main__":
     main()

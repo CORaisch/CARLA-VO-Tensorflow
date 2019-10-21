@@ -41,4 +41,5 @@ for sensor in args.sensors:
 ## compose and call string
 callstr = "python sequence_to_tfrec.py " + args.archive_name + " " + labels_file + " " + sensormap +\
           " -imc " + str(args.image_channels) + " -imw " + str(args.image_width) + " -imh " + str(args.image_height)
+print("call:", callstr)
 os.system(callstr)

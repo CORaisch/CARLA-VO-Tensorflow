@@ -1,29 +1,23 @@
 import tensorflow as tf
 import numpy as np
-import zipfile
-import os, sys, glob, signal, time, math
+import os, sys, glob, signal, time, math, argparse, zipfile
+import src.config as config
 
 
 ###################### config ######################
-DATASET_FILES             = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
+# DATASET_FILES             = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
 # DATASET_FILES             = ['tfrec_sequences/sequence_00.zip']
-BATCH_SIZE                = 32
-EPOCHES                   = 5
-SEQ_LEN                   = 2
-T0                        = 0 # NOTE conditions for t0, t1: t0<(seq_len-1) && t1<seq_len && t0 < t1 && t0>=0 && t1>=0
-T1                        = 1
-VALIDATION_SPLIT          = 0.2 # NOTE VALIDATION_SPLIT: number in range [0,1], its the fraction of the training data used for validation
-MODEL_FILE                = 'models/simple_flat__in4_seqlen2_imw196_imh196_out6.h5'
-CHECKPOINT_DIR            = 'checkpoints/'
-CHECKPOINT_FREQ           = 'epoch' # NOTE see https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
-LOG_DIR                   = 'logs/'
-ON_CLUSTER                = False
-
-
-# imports for debugging
-if not ON_CLUSTER:
-    from evo.tools import plot
-    import matplotlib.pyplot as plt
+# BATCH_SIZE                = 32
+# EPOCHES                   = 5
+# SEQ_LEN                   = 2
+# T0                        = 0 # NOTE conditions for t0, t1: t0<(seq_len-1) && t1<seq_len && t0 < t1 && t0>=0 && t1>=0
+# T1                        = 1
+# VALIDATION_SPLIT          = 0.2 # NOTE VALIDATION_SPLIT: number in range [0,1], its the fraction of the training data used for validation
+# MODEL_FILE                = 'models/simple_flat__in4_seqlen2_imw196_imh196_out6.h5'
+# CHECKPOINT_DIR            = 'checkpoints/'
+# CHECKPOINT_FREQ           = 'epoch' # NOTE see https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
+# LOG_DIR                   = 'logs/'
+# ON_CLUSTER                = False
 
 # run eager execution
 tf.compat.v1.enable_eager_execution()
@@ -32,6 +26,7 @@ tf.compat.v1.enable_eager_execution()
 ###################### debugging tools ######################
 # show images from numpy array
 def show_image(image, label):
+    import matplotlib.pyplot as plt
     if image.shape[2]==1:
         plt.imshow(image[:,:,0], cmap='gray')
     else:
@@ -42,6 +37,7 @@ def show_image(image, label):
 
 # show images from list
 def show_images(images, label, sequence_length):
+    import matplotlib.pyplot as plt
     # get useful information on images
     num_images = len(images)
     fig_cols   = int(num_images/sequence_length) # NOTE 'num_images' is always a multiple of 'sequence_length' => no ceil needed here
@@ -71,6 +67,7 @@ def show_tabbed_plots(pc):
     from PyQt5 import QtGui, QtWidgets
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
     from mpl_toolkits.mplot3d import Axes3D
+    import matplotlib.pyplot as plt
     # make qt5 application
     app = QtGui.QGuiApplication.instance()
     if app == None:
@@ -94,7 +91,7 @@ def show_tabbed_plots(pc):
     app.exec_()
     plt.close('all')
 
-def prepare_observations(obs, labels, layernames, seq_len, image_files, label_files):
+def prepare_observations(obs, labels, layernames, seq_len, image_files, label_files, t0, t1):
     images_batch = obs[0]
     labels_batch = obs[1]
     # roll random batch entry
@@ -115,7 +112,7 @@ def prepare_observations(obs, labels, layernames, seq_len, image_files, label_fi
         # pick original label for checking -> orig label == labels[T] where T is earliest time point in image ids
         if not orig_label_written and int(layer.split('_')[-1]) == 0:
             print("observation starting at t = {} (dataset: {})".format(im_no, im_id[:-1]))
-            orig_label = combine(labels[im_id][int(im_no)+T0 : int(im_no)+T1, :])
+            orig_label = combine(labels[im_id][int(im_no)+t0 : int(im_no)+t1, :])
             orig_label_written = True
     # check if label assignment is correct
     print("original label: ", orig_label)
@@ -157,6 +154,7 @@ def prepare_observations_keras(obs, labels, layernames, seq_len, image_files, la
     return image_data, label
 
 def make_observations_figure(image_data, label, seq_len):
+    import matplotlib.pyplot as plt
     # make observation figure
     num_images = len(image_data)
     figcols = int(num_images/seq_len)
@@ -179,7 +177,9 @@ def make_observations_figure(image_data, label, seq_len):
     return fig_obs
 
 def make_evo_traj_figures(traj_file_path):
+    import matplotlib.pyplot as plt
     from evo import main_traj
+    from evo.tools import plot
     # fake evo traj kitti input arguments
     class evo_args:
         def __init__(self, path):
@@ -207,31 +207,29 @@ def make_evo_traj_figures(traj_file_path):
 
 # NOTE set keras_compat=True if tf.dataset is mapped to 'make_keras_compatible', else use keras_compat=False
 def debug_vis(ds_final, labels, layernames, seq_len, image_files, label_files, keras_compat=True):
-    if ON_CLUSTER:
-        print("[NOTE] no support for evo and matplotlib on cluster")
-    else:
-        for obs in ds_final:
-            # make figures for trajectory and observations
-            if keras_compat:
-                image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len, image_files, label_files)
-            else:
-                image_data, label = prepare_observations(obs, labels, layernames, seq_len, image_files, label_files)
-            fig_obs = make_observations_figure(image_data, label, seq_len)
-            # create temporary pose file which holds 1) identity and 2) relative pose from label
-            tmp_file_name = '.tmp_label.txt'
-            with open(tmp_file_name, 'w') as f:
-                f.write(mat2string(np.eye(4, dtype=np.float64)) + mat2string(euler2mat(label)))
-            fig_traj, fig_xyz, fig_rpy = make_evo_traj_figures(tmp_file_name)
-            # remove temporary pose file
-            os.remove(tmp_file_name)
-            # add figures to evo::plot_collection instance
-            plot_collection = plot.PlotCollection("evo_traj - trajectory plot")
-            plot_collection.add_figure("observations", fig_obs)
-            plot_collection.add_figure("trajectories", fig_traj)
-            plot_collection.add_figure("xyz_view", fig_xyz)
-            plot_collection.add_figure("rpy_view", fig_rpy)
-            # show all plots in tabbed window
-            show_tabbed_plots(plot_collection)
+    from evo.tools import plot
+    for obs in ds_final:
+        # make figures for trajectory and observations
+        if keras_compat:
+            image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len, image_files, label_files)
+        else:
+            image_data, label = prepare_observations(obs, labels, layernames, seq_len, image_files, label_files, conf.t0, conf.t1)
+        fig_obs = make_observations_figure(image_data, label, seq_len)
+        # create temporary pose file which holds 1) identity and 2) relative pose from label
+        tmp_file_name = '.tmp_label.txt'
+        with open(tmp_file_name, 'w') as f:
+            f.write(mat2string(np.eye(4, dtype=np.float64)) + mat2string(euler2mat(label)))
+        fig_traj, fig_xyz, fig_rpy = make_evo_traj_figures(tmp_file_name)
+        # remove temporary pose file
+        os.remove(tmp_file_name)
+        # add figures to evo::plot_collection instance
+        plot_collection = plot.PlotCollection("evo_traj - trajectory plot")
+        plot_collection.add_figure("observations", fig_obs)
+        plot_collection.add_figure("trajectories", fig_traj)
+        plot_collection.add_figure("xyz_view", fig_xyz)
+        plot_collection.add_figure("rpy_view", fig_rpy)
+        # show all plots in tabbed window
+        show_tabbed_plots(plot_collection)
 
 # decodes and preprocess raw image
 def preprocess_image(image, shape):
@@ -251,6 +249,12 @@ def load_and_preprocess_image(path, shape):
 
 
 ###################### helpers ######################
+# get parameters from config file
+def parse_args():
+    argparser = argparse.ArgumentParser(description="This script trains a deep neural network on image sequences to learn to estimate the egomotion of the camera.")
+    argparser.add_argument('config', help="Config file needs to be passed in order to specify the training setup. See 'configs/sample.conf' for an template.")
+    return argparser.parse_args()
+
 # generates constant image description to parse image from TFRecord file
 def get_image_description():
     desc = {
@@ -390,11 +394,14 @@ def clean_assert(condition, image_files_list, label_files_list):
 def check_model_layout(model, layernames):
     # check if number of input layers of model is as expected
     tmp_input_layers = [ layer for layer in model.layers if isinstance(layer, tf.keras.layers.InputLayer) ]
+    print(tmp_input_layers)
     if len(tmp_input_layers) != len(layernames):
+        print("[ERROR] wrong number if input layers! Expected {} but {} given.".format(len(layernames), tmp_input_layers))
         return False
     # check if layernames are as expected
     for lname in layernames:
         try:
+            print(lname)
             model.get_layer(name=lname)
         except ValueError:
             print("[ERROR] unexpected layername encounterd at loaded model, ensure to load the correct model and that it was built with the same config as currently set")
@@ -412,18 +419,21 @@ tf.config.experimental_list_devices()
 # define signal handler for clean exit on Ctrl+C
 signal.signal(signal.SIGINT, signal_handler)
 
+# parse config file
+args = parse_args()
+conf = config.Config(args.config)
+
 ## extract dataset archive
 # TODO add option 'read_from_archive' so that it can be selected to read the data from zip or directly from disk
-# extract all files from archive
 num_obs_total  = 0
 final_datasets = []
 layernames     = []
-image_files    = [ [] for i in range(len(DATASET_FILES)) ]
-label_files    = [ [] for i in range(len(DATASET_FILES)) ]
+image_files    = [ [] for i in range(len(conf.dataset_files)) ]
+label_files    = [ [] for i in range(len(conf.dataset_files)) ]
 label_list_dbg = dict() # NOTE only used for debugging
-for i_arch in range(len(DATASET_FILES)):
-    arch_prefix = DATASET_FILES[i_arch].split('/')[-1].split('.')[0] + '_'
-    fz = zipfile.ZipFile(DATASET_FILES[i_arch], 'r')
+for i_arch in range(len(conf.dataset_files)):
+    arch_prefix = conf.dataset_files[i_arch].split('/')[-1].split('.')[0] + '_'
+    fz = zipfile.ZipFile(conf.dataset_files[i_arch], 'r')
     # read filenames from archive
     if i_arch == 0:
         arch_prefix_init = arch_prefix # needed to cut the prefix in later iterations
@@ -443,7 +453,7 @@ for i_arch in range(len(DATASET_FILES)):
                 fz.extract(im_file); os.rename(im_file, filename);
                 image_files[i_arch].append(filename)
             except KeyError:
-                print("[ERROR] file {} is required but could not be found in {}".format(im_file, DATASET_FILES[i_arch]))
+                print("[ERROR] file {} is required but could not be found in {}".format(im_file, conf.dataset_files[i_arch]))
                 fz.close()
                 cleanup_and_exit(image_files, label_files)
         # extract labels
@@ -457,7 +467,7 @@ for i_arch in range(len(DATASET_FILES)):
     input_image_dict = { f.split('.')[0].split(arch_prefix)[1] : tf.data.TFRecordDataset(f, compression_type='ZLIB') for f in image_files[i_arch] }
 
     ## read header information
-    print("[INFO] loading header from {}...".format(DATASET_FILES[i_arch]), end='', flush=True)
+    print("[INFO] loading header from {}...".format(conf.dataset_files[i_arch]), end='', flush=True)
     # NOTE all image TFRecord files have an header record as very first entry
     ds_header     = list(input_image_dict.values())[0]
     header_record = tf.io.parse_single_example(next(iter(ds_header)), get_header_description())
@@ -474,22 +484,22 @@ for i_arch in range(len(DATASET_FILES)):
         clean_assert(im_channels == header_record['channels'].numpy(), image_files, label_files)
     # compute information necessarry for further computation
     num_images       = header_record['num_images'].numpy()
-    num_observations = num_images - (SEQ_LEN - 1)
+    num_observations = num_images - (conf.seq_len - 1)
     num_obs_total   += num_observations
     del ds_header
     del header_record
     print(" done")
 
     ## read labels from .npz file
-    print("[INFO] loading labels from {}...".format(DATASET_FILES[i_arch]), end='', flush=True)
+    print("[INFO] loading labels from {}...".format(conf.dataset_files[i_arch]), end='', flush=True)
     # NOTE labels are stored as numpy array with shape (OBSERVATION_LENGTH, 6)
     # NOTE accessing: labels[T] returns the 6 dof relative pose from time T to T+1
     labels = np.load(label_files[i_arch][0])['labels']
     clean_assert(num_images-1 == labels.shape[0], image_files, label_files) # NOTE number of training images must match the number of labels - 1 (i.e. each pair of images needs one lable)
     # prepare labels s.t. user can specify between which 2 timepoints within the sequence the rel. pose should be used as label
     # example: SEQ_LEN=4 -> [t0,t1,t2,t3], label_from=[1,2] => use rel. pose from t1 to t2
-    clean_assert(SEQ_LEN>=2 and T0<T1 and T0>=0 and T1>0 and T0<(SEQ_LEN-1) and T1<SEQ_LEN, image_files, label_files) # NOTE check if t0,t1,SEQ_LEN are valid
-    observation_labels = [ combine(labels[i+T0 : i+T1, :]) for i in range(num_observations) ]
+    clean_assert(conf.seq_len>=2 and conf.t0<conf.t1 and conf.t0>=0 and conf.t1>0 and conf.t0<(conf.seq_len-1) and conf.t1<conf.seq_len, image_files, label_files) # NOTE check if t0,t1,conf.seq_len are valid
+    observation_labels = [ combine(labels[i+conf.t0 : i+conf.t1, :]) for i in range(num_observations) ]
     observation_labels = np.array(observation_labels)
     # create tf.data.Dataset object for labels
     ds_labels = tf.data.Dataset.from_tensor_slices(observation_labels)
@@ -498,15 +508,15 @@ for i_arch in range(len(DATASET_FILES)):
     print(" done")
 
     ## setup image data pipeline
-    print("[INFO] loading image data from {}...".format(DATASET_FILES[i_arch]), end='', flush=True)
+    print("[INFO] loading image data from {}...".format(conf.dataset_files[i_arch]), end='', flush=True)
     # iterate all input images and create td.data.Datasets for each image in the observation sequence
     ds_list    = []
     for i, (name, ds) in enumerate(input_image_dict.items()):
         # skip the header
         dataset = ds.skip(1)
         # create observation sequence
-        for t in range(SEQ_LEN):
-            sub_ds = dataset.skip(t).take(num_observations) # NOTE length of final dataset is: num_images - (SEQ_LEN-1)
+        for t in range(conf.seq_len):
+            sub_ds = dataset.skip(t).take(num_observations) # NOTE length of final dataset is: num_images - (conf.seq_len-1)
             # sub_ds = sub_ds.map(parse_image_record)
             # sub_ds = sub_ds.map(parse_image_record, num_parallel_calls=tf.data.experimental.AUTOTUNE)
             ds_list.append(sub_ds)
@@ -541,54 +551,58 @@ print(" done")
 # NOTE pipeline info: 1) observations are split into training and validation sets 1.5) validation set will be cached in local mem since it is small enough 2) sets are mapped to preprocess function in parallel 3) sets are batched and repeated 4) sets will be prefetched
 print("[INFO] setting up dataset pipeline (i.e. shuffling, batching, etc)...", end='', flush=True)
 # shuffle observations
-if VALIDATION_SPLIT <= 0.0:
+if conf.validation_split <= 0.0:
     # train on all observations
-    ds_final = ds_final.shuffle(num_obs_total).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(BATCH_SIZE).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    ds_final = ds_final.shuffle(num_obs_total).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
 else:
     # TODO put into functions
     # split the final observations into training and validation sets
-    num_validation_obs  = int(VALIDATION_SPLIT * num_obs_total)
+    num_validation_obs  = int(conf.validation_split * num_obs_total)
     ## VARIANT 1
     # ds_final            = ds_final.shuffle(num_obs_total)
-    # ds_final_validation = ds_final.take(num_validation_obs).batch(BATCH_SIZE).prefetch(num_validation_obs).repeat()
-    # ds_final_training   = ds_final.skip(num_validation_obs).batch(BATCH_SIZE).prefetch(num_obs_total-num_validation_obs).repeat()
+    # ds_final_validation = ds_final.take(num_validation_obs).batch(conf.batch_size).prefetch(num_validation_obs).repeat()
+    # ds_final_training   = ds_final.skip(num_validation_obs).batch(conf.batch_size).prefetch(num_obs_total-num_validation_obs).repeat()
     ## VARIANT 2
-    # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().repeat().batch(BATCH_SIZE).prefetch(tf.data.experimental.AUTOTUNE)
-    # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).repeat().batch(BATCH_SIZE).prefetch(tf.data.experimental.AUTOTUNE)
+    # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
     ## VARIANT 3
-    ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(BATCH_SIZE).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-    ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(BATCH_SIZE).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     # ## VARIANT DEBUG
-    # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(BATCH_SIZE).prefetch(tf.data.experimental.AUTOTUNE)
-    # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(BATCH_SIZE).prefetch(tf.data.experimental.AUTOTUNE)
+    # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
 print(" done")
 
 ## print dataset information
 print("[INFO] information about used dataset: ")
 print("\timage shape           : {}".format(image_shape))
-print("\tsequence length       : {}".format(SEQ_LEN))
-print("\tinfere pose from (t0) : {}".format(T0))
-print("\tinfere pose till (t1) : {}".format(T1))
+print("\tsequence length       : {}".format(conf.seq_len))
+print("\tinfere pose from (t0) : {}".format(conf.t0))
+print("\tinfere pose till (t1) : {}".format(conf.t1))
 print("\tnumber observations   : {}".format(num_obs_total))
 print("\tlabel format          : {}".format('(tx, ty, tz, roll, pitch, yaw)'))
-print("\tbatch size            : {}".format(BATCH_SIZE))
+print("\tbatch size            : {}".format(conf.batch_size))
 print("\tDNN input layer names : {}".format(layernames))
 
 # ## beg DEBUG visualize data without keras compatability
-# # NOTE comment line where 'make_keras_compatible' is mapped to ds_final
-# print("[INFO] visualizing random observations from batched dataset without mapping 'make_keras_compatible' to final_ds...")
-# debug_vis(ds_final_training, label_list_dbg, layernames, SEQ_LEN, image_files, label_files, keras_compat=False)
-# cleanup_and_exit(image_files, label_files)
+# if conf.on_cluster:
+#     print("[NOTE] no support for evo and matplotlib on cluster")
+# else:
+#     # # NOTE comment line where 'make_keras_compatible' is mapped to ds_final
+#     # print("[INFO] visualizing random observations from batched dataset without mapping 'make_keras_compatible' to final_ds...")
+#     # debug_vis(ds_final_training, label_list_dbg, layernames, conf.seq_len, image_files, label_files, keras_compat=False)
+#     # cleanup_and_exit(image_files, label_files)
+#     # ## end DEBUG
+
+#     ## beg DEBUG visualize data from final dataset
+#     print("[INFO] visualizing random observations from batched final_ds dataset...")
+#     debug_vis(ds_final_training, label_list_dbg, layernames, conf.seq_len, image_files, label_files, keras_compat=True)
+#     cleanup_and_exit(image_files, label_files)
 # ## end DEBUG
 
-# ## beg DEBUG visualize data from final dataset
-# print("[INFO] visualizing random observations from batched final_ds dataset...")
-# debug_vis(ds_final_training, label_list_dbg, layernames, SEQ_LEN, image_files, label_files, keras_compat=True)
-# cleanup_and_exit(image_files, label_files)
-# ## end DEBUG
 
 ## savely load model from config path
-model = tf.keras.models.load_model(MODEL_FILE)
+model = tf.keras.models.load_model(conf.model_file)
 clean_assert(check_model_layout(model, layernames), image_files, label_files)
 
 ## print model informations
@@ -597,14 +611,15 @@ model.summary()
 # tf.keras.utils.plot_model(model, to_file='dummy_model.png', show_shapes=True, show_layer_names=True, rankdir='LR') # NOTE install pydot and graphviz for plotting model images
 
 ## setup tf.keras callbacks for training loop NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
-print("[INFO] training the model, logs will be written to '{}' and checkpoints to '{}':".format(LOG_DIR, CHECKPOINT_DIR))
+print("[INFO] training the model, logs will be written to '{}' and checkpoints to '{}':".format(conf.log_dir, conf.checkpoint_dir))
 # log tensorboard data NOTE inofs at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
-tb_logger = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(LOG_DIR, 'tensorboard'))
+tb_logger = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(conf.log_dir, 'tensorboard'))
 # log into csv file NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/CSVLogger
-csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(LOG_DIR, 'csv', 'training.log'))
+csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(conf.log_dir, 'csv', 'training.log'))
 # setup training checkpointing NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
-cpkt_filename = os.path.join(CHECKPOINT_DIR, 'ckpt-'+str(int(time.time()))+'-{epoch:05d}.ckpt')
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weigths_only=True, verbose=1, save_freq=CHECKPOINT_FREQ)
+timestamp_file = str(int(time.time()))
+cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}.ckpt')
+checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weigths_only=True, verbose=1, save_freq=conf.checkpoint_freq)
 # TODO check usefull options: mode, save_best_only
 
 ## beg DEBUG
@@ -612,30 +627,30 @@ checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename,
 ## end DEBUG
 
 ## train model using keras training loop
-if VALIDATION_SPLIT <= 0.0:
+if conf.validation_split <= 0.0:
     history = model.fit(
         ds_final,
-        steps_per_epoch=num_obs_total/BATCH_SIZE,
-        epochs=EPOCHES,
+        steps_per_epoch=num_obs_total/conf.batch_size,
+        epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 else:
     history = model.fit(
         ds_final_training,
         validation_data=ds_final_validation,
-        validation_steps=num_validation_obs/BATCH_SIZE,
-        steps_per_epoch=(num_obs_total-num_validation_obs)/BATCH_SIZE,
-        epochs=EPOCHES,
+        validation_steps=num_validation_obs/conf.batch_size,
+        steps_per_epoch=(num_obs_total-num_validation_obs)/conf.batch_size,
+        epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 
 # save final model
-extension = '.' + MODEL_FILE.split('.')[-1]
-final_model_name = MODEL_FILE.split(extension)[0] + '_trained' + extension
+extension = '.' + conf.model_file.split('.')[-1]
+final_model_name = conf.model_file.split(extension)[0] + '_trained_' + timestamp_file + extension
 print("[INFO] training done, final model is saved at '{}'".format(final_model_name))
 model.save(final_model_name)
 
 print("[INFO] training loss history:")
 print(history.history['loss'])
-if VALIDATION_SPLIT > 0.0:
+if conf.validation_split > 0.0:
     print("[INFO] validation loss history:")
     print(history.history['val_loss'])
 

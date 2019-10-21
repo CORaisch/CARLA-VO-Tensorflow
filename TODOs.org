@@ -14,7 +14,14 @@
    CLOSED: [2019-10-17 Thu 22:32]
 ** DONE get rid of TFREC_COMPRESSION_TYPE argument
    CLOSED: [2019-10-18 Fri 16:52]
-** TODO add support for global config file that can be set up once and is passed as single argument to 'train_sequence.py' and 'model__*.py' scripts
+** TODO at model__*.py scripts should no longer use config file as input
+*** use list of names as argument as well as full output model name
+*** also use list of names as argument at 'train_sequence.py'
+** TODO at 'train_sequence.py' add option 'read_from_archive' so that it can be chosen to read the data from zip or directly from disk
+*** when reading from archive all files will be unpacked during training besides the archive -> redundant use of memory
+*** at 'train_sequence.py': when 'read_from_arch == False' then request a list of filepaths as argument 
+** DONE add support for global config file that can be set up once and is passed as single argument to 'train_sequence.py' and 'model__*.py' scripts
+   CLOSED: [2019-10-21 Mon 13:29]
 *** use pythons builtin configparser combined with the JSON parser as in: https://stackoverflow.com/questions/335695/lists-in-configparser
 ** TODO modularize code
 *** check which functions are used at multiple scripts and put them into util module
