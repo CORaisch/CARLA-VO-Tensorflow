@@ -16,7 +16,6 @@ def parse_args():
     argparser.add_argument('--image_channels', '-imc', type=int, default=1, help="1 = images are stored grayscale, 3 = images are stored RGB")
     argparser.add_argument('--image_width', '-imw', type=int, default=196, help="width of stored images")
     argparser.add_argument('--image_height', '-imh', type=int, default=196, help="height of stored images")
-    argparser.add_argument('--compression_type', '-compression', type=str, default='ZLIB', metavar="ZLIB|GZIP", help="compression type used for tfrecord files")
     # parse args
     args = argparser.parse_args()
     # set default archive name
@@ -26,15 +25,6 @@ def parse_args():
     return args
 
 args = parse_args()
-
-# print(args.base)
-# print(args.sensors)
-# print(args.labels)
-# print(args.archive_name)
-# print(args.image_channels)
-# print(args.image_width)
-# print(args.image_height)
-# print(args.compression_type)
 
 ## get labels file
 # add extension if not already there

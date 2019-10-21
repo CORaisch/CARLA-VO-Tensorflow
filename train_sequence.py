@@ -7,7 +7,6 @@ import os, sys, glob, signal, time, math
 ###################### config ######################
 DATASET_FILES             = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
 # DATASET_FILES             = ['tfrec_sequences/sequence_00.zip']
-TFRECORD_COMPRESSION_TYPE = 'ZLIB'
 BATCH_SIZE                = 32
 EPOCHES                   = 5
 SEQ_LEN                   = 2
@@ -455,7 +454,7 @@ for i_arch in range(len(DATASET_FILES)):
     fz.close()
 
     ## compose dictionary of input image TFRecord files
-    input_image_dict = { f.split('.')[0].split(arch_prefix)[1] : tf.data.TFRecordDataset(f, compression_type=TFRECORD_COMPRESSION_TYPE) for f in image_files[i_arch] }
+    input_image_dict = { f.split('.')[0].split(arch_prefix)[1] : tf.data.TFRecordDataset(f, compression_type='ZLIB') for f in image_files[i_arch] }
 
     ## read header information
     print("[INFO] loading header from {}...".format(DATASET_FILES[i_arch]), end='', flush=True)

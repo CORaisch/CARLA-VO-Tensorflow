@@ -24,7 +24,6 @@ def parse_args():
     argparser.add_argument('--image_channels', '-imc', type=int, default=1, help="1 = images are stored grayscale, 3 = images are stored RGB")
     argparser.add_argument('--image_width', '-imw', type=int, default=196, help="width of stored images")
     argparser.add_argument('--image_height', '-imh', type=int, default=196, help="height of stored images")
-    argparser.add_argument('--compression_type', '-compression', type=str, default='ZLIB', metavar="ZLIB|GZIP", help="compression type used for tfrecord files")
     # parse args
     args = argparser.parse_args()
     # convert inputmap to dict
@@ -138,8 +137,8 @@ image_paths, labels, num_images = load_dataset_paths(args.inputmap, args.labels)
 print("archive name: ", args.archive_name)
 for name, paths in image_paths.items():
     filename = name + '.tfrec'
-    print("[INFO] writing images to TFRecord at \'{0}\' compressing with {1}...".format(filename, args.compression_type.lower()), end='', flush=True)
-    write_images_to_tfrec(paths, filename, (args.image_width, args.image_height, args.image_channels), args.archive_name, compression_type=args.compression_type)
+    print("[INFO] writing images to TFRecord at \'{0}\' compressing with 'zlib'...".format(filename), end='', flush=True)
+    write_images_to_tfrec(paths, filename, (args.image_width, args.image_height, args.image_channels), args.archive_name, compression_type='ZLIB')
     print(" done")
 # 2) write labels to .npy file
 labels_file = 'labels.npz'
