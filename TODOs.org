@@ -14,7 +14,8 @@
    CLOSED: [2019-10-17 Thu 22:32]
 ** DONE get rid of TFREC_COMPRESSION_TYPE argument
    CLOSED: [2019-10-18 Fri 16:52]
-** TODO at model__*.py scripts should no longer use config file as input
+** TODO write 'model__cnn.py' that creates CNN similar to CNN from 'DeepVO: Towards End-to-End VO with DRCNN'
+** TODO at 'model__*.py' scripts should no longer use config file as input
 *** use list of names as argument as well as full output model name
 *** also use list of names as argument at 'train_sequence.py'
 ** TODO at 'train_sequence.py' add option 'read_from_archive' so that it can be chosen to read the data from zip or directly from disk
