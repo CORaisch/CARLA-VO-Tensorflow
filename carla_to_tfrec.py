@@ -21,6 +21,12 @@ def parse_args():
     # set default archive name
     if args.archive_name == None:
         args.archive_name = args.base.split('/')[-1]
+    else:
+        # crop extension if exists
+        # NOTE assuming no points in name except for extension
+        tmp = args.archive_name.split('.')
+        if len(tmp) != 1:
+            args.archive_name = tmp[0]
     # return parsed arguments
     return args
 
