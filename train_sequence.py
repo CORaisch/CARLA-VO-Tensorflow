@@ -6,7 +6,6 @@ import src.config as config
 # run eager execution
 tf.compat.v1.enable_eager_execution()
 
-
 ###################### debugging tools ######################
 # show images from numpy array
 def show_image(image, label):
