@@ -3,22 +3,6 @@ import numpy as np
 import os, sys, glob, signal, time, math, argparse, zipfile
 import src.config as config
 
-
-###################### config ######################
-# DATASET_FILES             = ['tfrec_sequences/sequence_00.zip', 'tfrec_sequences/sequence_01.zip']
-# DATASET_FILES             = ['tfrec_sequences/sequence_00.zip']
-# BATCH_SIZE                = 32
-# EPOCHES                   = 5
-# SEQ_LEN                   = 2
-# T0                        = 0 # NOTE conditions for t0, t1: t0<(seq_len-1) && t1<seq_len && t0 < t1 && t0>=0 && t1>=0
-# T1                        = 1
-# VALIDATION_SPLIT          = 0.2 # NOTE VALIDATION_SPLIT: number in range [0,1], its the fraction of the training data used for validation
-# MODEL_FILE                = 'models/simple_flat__in4_seqlen2_imw196_imh196_out6.h5'
-# CHECKPOINT_DIR            = 'checkpoints/'
-# CHECKPOINT_FREQ           = 'epoch' # NOTE see https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
-# LOG_DIR                   = 'logs/'
-# ON_CLUSTER                = False
-
 # run eager execution
 tf.compat.v1.enable_eager_execution()
 
@@ -253,6 +237,7 @@ def load_and_preprocess_image(path, shape):
 def parse_args():
     argparser = argparse.ArgumentParser(description="This script trains a deep neural network on image sequences to learn to estimate the egomotion of the camera.")
     argparser.add_argument('config', help="Config file needs to be passed in order to specify the training setup. See 'configs/sample.conf' for an template.")
+    argparser.add_argument('--base', '-b', type=str, default='.', help="If train on cluster set this to the remote directory like \'/scratch/X\'. It treats as base directory for the training dataset.")
     return argparser.parse_args()
 
 # generates constant image description to parse image from TFRecord file
@@ -277,7 +262,7 @@ def get_header_description():
 # NOTE 'image_shape' needs to be provided global
 def parse_image_record(raw_record):
     record = tf.io.parse_single_example(raw_record, get_image_description())
-    image  = tf.decode_raw(record['image'], tf.float32); image = tf.reshape(image, image_shape);
+    image  = tf.io.decode_raw(record['image'], tf.float32); image = tf.reshape(image, image_shape);
     return (record['id'], image)
 
 # this functions takes the n-tuple of input-image records, extract the images and returns a dictionary mapping
@@ -422,6 +407,9 @@ signal.signal(signal.SIGINT, signal_handler)
 # parse config file
 args = parse_args()
 conf = config.Config(args.config)
+# adjust base directory to consider training on cluster
+conf.dataset_files = [ os.path.join(args.base, s) for s in conf.dataset_files ]
+conf.model_file = os.path.join(args.base, conf.model_file)
 
 ## extract dataset archive
 # TODO add option 'read_from_archive' so that it can be selected to read the data from zip or directly from disk
@@ -619,7 +607,8 @@ csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(conf.log_dir, 'csv', 'tra
 # setup training checkpointing NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
 timestamp_file = str(int(time.time()))
 cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}.ckpt')
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weigths_only=True, verbose=1, save_freq=conf.checkpoint_freq)
+# checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, verbose=1, save_freq=conf.checkpoint_freq)
+checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, verbose=1) # TODO save_freq not available on tf2.0a
 # TODO check usefull options: mode, save_best_only
 
 ## beg DEBUG
@@ -643,10 +632,8 @@ else:
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 
 # save final model
-extension = '.' + conf.model_file.split('.')[-1]
-final_model_name = conf.model_file.split(extension)[0] + '_trained_' + timestamp_file + extension
-print("[INFO] training done, final model is saved at '{}'".format(final_model_name))
-model.save(final_model_name)
+print("[INFO] training done, final model is saved at '{}'".format(conf.model_out))
+model.save(conf.model_out)
 
 print("[INFO] training loss history:")
 print(history.history['loss'])
