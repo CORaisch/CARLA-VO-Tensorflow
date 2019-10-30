@@ -21,6 +21,7 @@ class Config:
         self.checkpoint_dir = json.loads(conf['TRAINING']['CHECKPOINT_DIR'])
         self.checkpoint_freq = self._parse_ckpt_frq(json.loads(conf['TRAINING']['CHECKPOINT_FREQ']))
         self.log_dir = json.loads(conf['TRAINING']['LOG_DIR'])
+        self.model_out = json.loads(conf['TRAINING']['MODEL_OUT'])
         self.on_cluster = self._parse_bool(conf['TRAINING']['ON_CLUSTER'])
 
     def _parse_ckpt_frq(self, val):
