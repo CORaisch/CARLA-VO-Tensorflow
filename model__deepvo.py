@@ -108,6 +108,7 @@ def main():
              + '_seqlen' + str(conf.seq_len) \
              + '_imw'    + str(conf.image_shape[0]) \
              + '_imh'    + str(conf.image_shape[1]) \
+             + '_imc'    + str(conf.image_shape[2]) \
              + '_out6'   + '.h5'
     model.save(os.path.join(args.model_out, name))
     # print final model
