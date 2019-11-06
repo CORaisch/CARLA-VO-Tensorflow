@@ -22,7 +22,7 @@ class Config:
         self.checkpoint_freq = self._parse_ckpt_frq(json.loads(conf['TRAINING']['CHECKPOINT_FREQ']))
         self.log_dir = json.loads(conf['TRAINING']['LOG_DIR'])
         self.model_out = json.loads(conf['TRAINING']['MODEL_OUT'])
-        self.on_cluster = self._parse_bool(conf['TRAINING']['ON_CLUSTER'])
+        self.debug = self._parse_bool(conf['TRAINING']['DEBUG'])
 
     def _parse_ckpt_frq(self, val):
         # NOTE assuming val is encoding either string or integer
@@ -64,7 +64,8 @@ def main():
     my_print(conf.checkpoint_dir)
     my_print(conf.checkpoint_freq)
     my_print(conf.log_dir)
-    my_print(conf.on_cluster)
+    my_print(conf.model_out)
+    my_print(conf.debug)
 
 if __name__ == "__main__":
     main()
