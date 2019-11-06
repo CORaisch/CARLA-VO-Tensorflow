@@ -30,9 +30,7 @@ def parse_args():
     args.inputmap = { pair.split('=')[0] : pair.split('=')[1] for pair in args.inputmap }
     # crop extension of archive name if exists
     # NOTE assuming no points in name except for extension
-    tmp = args.archive_name.split('.')
-    if len(tmp) != 1:
-        args.archive_name = tmp[0]
+    tmp = args.archive_name.split('.')[0]
     # return parsed arguments
     return args
 
@@ -105,6 +103,7 @@ def write_images_to_tfrec(paths, filename, inputshape, archname, compression_typ
         writer.write(header_record.SerializeToString())
         # write images
         for path in paths:
+            archname = archname.split('/')[-1] # cut path from archive name
             tf_example = make_image_record(path, inputshape, archname)
             writer.write(tf_example.SerializeToString())
 
