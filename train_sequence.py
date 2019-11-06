@@ -141,7 +141,7 @@ def make_observations_figure(image_data, label, seq_len):
     # make observation figure
     num_images = len(image_data)
     figcols = int(num_images/seq_len)
-    fig_obs, im_axes = plt.subplots(nrows=seq_len, ncols=figcols)
+    fig_obs, im_axes = plt.subplots(nrows=seq_len, ncols=figcols, squeeze=False)
     for row in range(seq_len):
         for col in range(figcols):
             idx = row * figcols + col
@@ -236,7 +236,7 @@ def load_and_preprocess_image(path, shape):
 def parse_args():
     argparser = argparse.ArgumentParser(description="This script trains a deep neural network on image sequences to learn to estimate the egomotion of the camera.")
     argparser.add_argument('config', help="Config file needs to be passed in order to specify the training setup. See 'configs/sample.conf' for an template.")
-    argparser.add_argument('--base', '-b', type=str, default='.', help="If train on cluster set this to the remote directory like \'/scratch/X\'. It treats as base directory for the training dataset.")
+    argparser.add_argument('--unpack_to', '-u', type=str, default='.', help="If train on cluster set this to the remote directory like \'/scratch/X\'. All datasets used for training will be extracted to this directory.")
     return argparser.parse_args()
 
 # generates constant image description to parse image from TFRecord file
@@ -403,15 +403,19 @@ tf.config.experimental_list_devices()
 # define signal handler for clean exit on Ctrl+C
 signal.signal(signal.SIGINT, signal_handler)
 
+# give info about used tensorflow version
+print("[INFO] using tensorflow version {}".format(tf.__version__))
+
 # parse config file
 args = parse_args()
 conf = config.Config(args.config)
-# adjust base directory to consider training on cluster
-conf.dataset_files = [ os.path.join(args.base, s) for s in conf.dataset_files ]
-conf.model_file = os.path.join(args.base, conf.model_file)
+
+## NOTE TODO when dataset generation will be outsourced UNPACK_DIR should become an argument to the appropriate function
+UNPACK_DIR=args.unpack_to
+
+## TODO from here: outsource code to function
 
 ## extract dataset archive
-# TODO add option 'read_from_archive' so that it can be selected to read the data from zip or directly from disk
 num_obs_total  = 0
 final_datasets = []
 layernames     = []
@@ -425,8 +429,8 @@ for i_arch in range(len(conf.dataset_files)):
     if i_arch == 0:
         arch_prefix_init = arch_prefix # needed to cut the prefix in later iterations
         for im_file in fz.namelist():
-            filename = arch_prefix + im_file
-            fz.extract(im_file); os.rename(im_file, filename);
+            filename     = os.path.join(UNPACK_DIR, arch_prefix + im_file)
+            filename_ext = fz.extract(im_file, path=UNPACK_DIR); os.rename(filename_ext, filename);
             if im_file == 'labels.npz':
                 label_files[i_arch].append(filename)
             else:
@@ -434,24 +438,25 @@ for i_arch in range(len(conf.dataset_files)):
     else:
         # if multiple archives are used it needs to be ensured that all archives holds the same files
         for im_file in image_files[0]:
-            im_file = im_file.split(arch_prefix_init)[-1]
+            im_file = im_file.split(os.path.join(UNPACK_DIR, arch_prefix_init))[-1]
             try:
-                filename = arch_prefix + im_file
-                fz.extract(im_file); os.rename(im_file, filename);
+                filename     = os.path.join(UNPACK_DIR, arch_prefix + im_file)
+                filename_ext = fz.extract(im_file, path=UNPACK_DIR); os.rename(filename_ext, filename);
                 image_files[i_arch].append(filename)
             except KeyError:
                 print("[ERROR] file {} is required but could not be found in {}".format(im_file, conf.dataset_files[i_arch]))
                 fz.close()
                 cleanup_and_exit(image_files, label_files)
         # extract labels
-        filename = arch_prefix + 'labels.npz'
-        fz.extract('labels.npz'); os.rename('labels.npz', filename);
+        filename     = os.path.join(UNPACK_DIR, arch_prefix + 'labels.npz')
+        filename_ext = fz.extract('labels.npz', path=UNPACK_DIR); os.rename(filename_ext, filename);
         label_files[i_arch].append(filename)
     # close archive
     fz.close()
 
     ## compose dictionary of input image TFRecord files
-    input_image_dict = { f.split('.')[0].split(arch_prefix)[1] : tf.data.TFRecordDataset(f, compression_type='ZLIB') for f in image_files[i_arch] }
+    # dict( input_layername : TFRecordDataset )
+    input_image_dict = { f.split('/')[-1].split('.')[0].split(arch_prefix)[-1] : tf.data.TFRecordDataset(f, compression_type='ZLIB') for f in image_files[i_arch] }
 
     ## read header information
     print("[INFO] loading header from {}...".format(conf.dataset_files[i_arch]), end='', flush=True)
@@ -525,6 +530,8 @@ for i_arch in range(len(conf.dataset_files)):
     del ds
     print(" done")
 
+## TODO till here: outsource code into function
+
 # concatenate all tf.data.Datasets to one final tf.data.Dataset
 print("[INFO] concatenating {} datasets to dataset with {} observations...".format(len(final_datasets), num_obs_total), end='', flush=True)
 ds_final = final_datasets[0]
@@ -545,19 +552,22 @@ else:
     # TODO put into functions
     # split the final observations into training and validation sets
     num_validation_obs  = int(conf.validation_split * num_obs_total)
-    ## VARIANT 1
-    # ds_final            = ds_final.shuffle(num_obs_total)
-    # ds_final_validation = ds_final.take(num_validation_obs).batch(conf.batch_size).prefetch(num_validation_obs).repeat()
-    # ds_final_training   = ds_final.skip(num_validation_obs).batch(conf.batch_size).prefetch(num_obs_total-num_validation_obs).repeat()
-    ## VARIANT 2
-    # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-    # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-    ## VARIANT 3
-    ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-    ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-    # ## VARIANT DEBUG
-    # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-    # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    if conf.debug:
+        # NOTE do not map 'make_keras_compatible' for debug to get all debug information
+        ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    else:
+        ## VARIANT 1
+        # ds_final            = ds_final.shuffle(num_obs_total)
+        # ds_final_validation = ds_final.take(num_validation_obs).batch(conf.batch_size).prefetch(num_validation_obs).repeat()
+        # ds_final_training   = ds_final.skip(num_validation_obs).batch(conf.batch_size).prefetch(num_obs_total-num_validation_obs).repeat()
+        ## VARIANT 2
+        # ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        # ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        ## VARIANT 3
+        ds_final_validation = ds_final.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        ds_final_training   = ds_final.skip(num_validation_obs).shuffle(num_obs_total-num_validation_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+
 print(" done")
 
 ## print dataset information
@@ -571,22 +581,19 @@ print("\tlabel format          : {}".format('(tx, ty, tz, roll, pitch, yaw)'))
 print("\tbatch size            : {}".format(conf.batch_size))
 print("\tDNN input layer names : {}".format(layernames))
 
-# ## beg DEBUG visualize data without keras compatability
-# if conf.on_cluster:
-#     print("[NOTE] no support for evo and matplotlib on cluster")
-# else:
-#     # # NOTE comment line where 'make_keras_compatible' is mapped to ds_final
-#     # print("[INFO] visualizing random observations from batched dataset without mapping 'make_keras_compatible' to final_ds...")
-#     # debug_vis(ds_final_training, label_list_dbg, layernames, conf.seq_len, image_files, label_files, keras_compat=False)
-#     # cleanup_and_exit(image_files, label_files)
-#     # ## end DEBUG
+## beg DEBUG visualize data without keras compatability
+if conf.debug:
+    ## visualize data from final dataset with extended debug informations and asserts
+    # NOTE comment line where 'make_keras_compatible' is mapped to ds_final
+    print("[INFO] visualizing random observations from batched dataset without mapping 'make_keras_compatible' to final_ds...")
+    debug_vis(ds_final_training, label_list_dbg, layernames, conf.seq_len, image_files, label_files, keras_compat=False)
+    cleanup_and_exit(image_files, label_files)
 
-#     ## beg DEBUG visualize data from final dataset
-#     print("[INFO] visualizing random observations from batched final_ds dataset...")
-#     debug_vis(ds_final_training, label_list_dbg, layernames, conf.seq_len, image_files, label_files, keras_compat=True)
-#     cleanup_and_exit(image_files, label_files)
-# ## end DEBUG
-
+    # ## visualize data from final dataset
+    # print("[INFO] visualizing random observations from batched final_ds dataset...")
+    # debug_vis(ds_final_training, label_list_dbg, layernames, conf.seq_len, image_files, label_files, keras_compat=True)
+    # cleanup_and_exit(image_files, label_files)
+## end DEBUG
 
 ## savely load model from config path
 model = tf.keras.models.load_model(conf.model_file)
