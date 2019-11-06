@@ -7,9 +7,11 @@ import src.config as config
 tf.compat.v1.enable_eager_execution()
 
 ########################### SAMPLE CONFIG ###########################
-TRAINED_MODEL = "models/cnn_trained.h5"
-LEFT_INPUT    = "/home/claudio/Datasets/CARLA/sequence_01/rgb/left/images"
-RIGHT_INPUT   = "/home/claudio/Datasets/CARLA/sequence_01/rgb/right/images"
+# TRAINED_MODEL = "models/cnn_trained.h5"
+TRAINED_MODEL = "models/trained_9min.h5"
+LEFT_INPUT    = "/home/claudio/Datasets/CARLA/sequence_00/rgb/left/images"
+RIGHT_INPUT   = "/home/claudio/Datasets/CARLA/sequence_00/rgb/right/images"
+PRED_FILE     = "predictions/pred.txt"
 SHAPE         = [256, 256, 1]
 STEREO        = True
 SEQ_LEN       = 2
@@ -30,6 +32,10 @@ def preprocess_image(image, shape):
     image /= 255.0
     # return final image
     return image
+
+def write_pred_to_file(f, pred):
+    fstr = str(pred[0]) + ' ' + str(pred[1]) + ' ' + str(pred[2]) + ' ' + str(pred[3]) + ' ' + str(pred[4]) + ' ' + str(pred[5]) + '\n'
+    f.write(fstr)
 
 # TODO visualize input images in grid
 # left_i   | right_i
@@ -52,29 +58,37 @@ print(" done")
 print("[INFO] information about the DNN model thats going to be evaluated:")
 model.summary()
 
+## get number of images of current observation
+nimages = len([name for name in os.listdir(LEFT_INPUT) if os.path.isfile(os.path.join(LEFT_INPUT,name))])
+
 ## load input-images
-time = 0
-# load input images for current timestep
-inputs = {}
-for i in range(0,SEQ_LEN):
-    # load left image
-    lname  = 'rgb_left_'+str(i)
-    inputs[lname] = tf.stack([load_and_preprocess_image(os.path.join(LEFT_INPUT, '%010d' % (time+i) + '.png'), SHAPE)])
-    # load right image
-    if STEREO:
-        rname = 'rgb_right_'+str(i)
-        inputs[rname] = tf.stack([load_and_preprocess_image(os.path.join(RIGHT_INPUT, '%010d' % (time+i) + '.png'), SHAPE)])
+with open(PRED_FILE, 'w') as predf:
+    for time in range(0,nimages-(SEQ_LEN-1)):
+        # load input images for current timestep
+        inputs = {}
+        for i in range(0,SEQ_LEN):
+            # load left image
+            lname = 'rgb_left_'+str(i)
+            lpath = os.path.join(LEFT_INPUT, '%010d' % (time+i) + '.png')
+            inputs[lname] = tf.stack([load_and_preprocess_image(lpath, SHAPE)])
+            # load right image
+            if STEREO:
+                rname = 'rgb_right_'+str(i)
+                rpath = os.path.join(RIGHT_INPUT, '%010d' % (time+i) + '.png')
+                inputs[rname] = tf.stack([load_and_preprocess_image(rpath, SHAPE)])
 
-# visualize images
-visualize_inputs(inputs)
+        # visualize images
+        # visualize_inputs(inputs)
 
-## get model predictions for the input-images
-pred = model.predict(inputs, batch_size=1, verbose=0)
-assert(pred.shape==(1,6)) # prediction must always be 1x6 vector
+        ## get model predictions for the input-images
+        pred = model.predict(inputs, batch_size=1, verbose=0)
+        assert(pred.shape==(1,6)) # prediction must always be 1x6 vector
 
-## print predictions
-print("[INFO] Prediction t={}: {}".format(time, pred[0]))
+        ## print prediction (serves as status report)
+        print("[INFO] Prediction t={}: {}".format(time, pred[0]))
 
+        ## write prediction to file
+        write_pred_to_file(predf, pred[0])
 
 #### LATER TODOs:
 # 1) loop above code over complete sequence
