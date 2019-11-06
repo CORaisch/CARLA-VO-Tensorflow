@@ -3,3 +3,4 @@ checkpoints/
 models/
 logs/
 tfrec_sequences/
+src/__pychace__/
