@@ -4,13 +4,13 @@
 #a) Define slurm job parameters
 ####
 
-#SBATCH --job-name=cst-test
+#SBATCH --job-name=cst
 #resources:
 
 #SBATCH --cpus-per-task=4
 # the job can use and see 4 CPUs (from max 24).
 
-#SBATCH --partition=test
+#SBATCH --partition=day
 # the slurm partition the job is queued to.
 
 #SBATCH --mem-per-cpu=12G
@@ -51,7 +51,7 @@ cp ~/CARLA_Tensorflow/$TRAIN_SCRIPT /scratch/$SLURM_JOB_ID/$TRAIN_SCRIPT
 cp ~/CARLA_Tensorflow/__init__.py /scratch/$SLURM_JOB_ID/__init__.py
 cp ~/CARLA_Tensorflow/models/$MODEL /scratch/$SLURM_JOB_ID/$MODEL
 mkdir -p /scratch/$SLURM_JOB_ID/src && cp ~/CARLA_Tensorflow/src/config.py /scratch/$SLURM_JOB_ID/src/config.py
-cp ~/CARLA_Tensorflow/configs/sample.conf /scratch/$SLURM_JOB_ID/sample.conf
+cp ~/CARLA_Tensorflow/configs/cluster.conf /scratch/$SLURM_JOB_ID/cluster.conf
 echo "copying simg..."
 cp $IMG_BASE/$IMG_FILE /scratch/$SLURM_JOB_ID/$IMG_FILE
 echo "copying done, execution following..."
@@ -64,6 +64,6 @@ echo "copying done, execution following..."
 
 cd ~/CARLA_Training/nvidia_out
 ( watch -n 10 nvidia-smi > nvidia_out.txt ) &
-singularity exec --nv /scratch/$SLURM_JOB_ID/$IMG_FILE python3 /scratch/$SLURM_JOB_ID/$TRAIN_SCRIPT /scratch/$SLURM_JOB_ID/sample.conf --base /scratch/$SLURM_JOB_ID
+singularity exec --nv /scratch/$SLURM_JOB_ID/$IMG_FILE python3 /scratch/$SLURM_JOB_ID/$TRAIN_SCRIPT /scratch/$SLURM_JOB_ID/cluster.conf --base /scratch/$SLURM_JOB_ID
 echo DONE!
 
