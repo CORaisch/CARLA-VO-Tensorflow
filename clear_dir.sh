@@ -20,3 +20,8 @@ if [ -d "checkpoints" ]; then
 else
     mkdir checkpoints
 fi
+
+# clear all cluster messages
+if ls job.* 1> /dev/null 2>&1; then
+	rm -f job.*
+fi
