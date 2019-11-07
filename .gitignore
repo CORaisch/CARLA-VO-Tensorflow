@@ -4,3 +4,4 @@ models/
 logs/
 tfrec_sequences/
 src/__pycache__/
+job.*
