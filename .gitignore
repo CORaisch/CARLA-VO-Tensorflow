@@ -5,3 +5,4 @@ logs/
 tfrec_sequences/
 src/__pycache__/
 job.*
+nvidia_out.txt
