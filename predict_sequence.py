@@ -8,12 +8,12 @@ tf.compat.v1.enable_eager_execution()
 
 ########################### SAMPLE CONFIG ###########################
 # TRAINED_MODEL = "models/cnn_trained.h5"
-TRAINED_MODEL = "models/trained_9min.h5"
+TRAINED_MODEL = "models/deepvo_trained.h5"
 LEFT_INPUT    = "/home/claudio/Datasets/CARLA/sequence_00/rgb/left/images"
-RIGHT_INPUT   = "/home/claudio/Datasets/CARLA/sequence_00/rgb/right/images"
-PRED_FILE     = "predictions/pred.txt"
+# RIGHT_INPUT   = "/home/claudio/Datasets/CARLA/sequence_01/rgb/right/images"
+PRED_FILE     = "predictions/pred_deepvo.txt"
 SHAPE         = [256, 256, 1]
-STEREO        = True
+STEREO        = False
 SEQ_LEN       = 2
 
 
@@ -65,6 +65,7 @@ nimages = len([name for name in os.listdir(LEFT_INPUT) if os.path.isfile(os.path
 with open(PRED_FILE, 'w') as predf:
     for time in range(0,nimages-(SEQ_LEN-1)):
         # load input images for current timestep
+        # TODO layernames must be computed from config file to be consistent with rest of data
         inputs = {}
         for i in range(0,SEQ_LEN):
             # load left image
@@ -77,7 +78,7 @@ with open(PRED_FILE, 'w') as predf:
                 rpath = os.path.join(RIGHT_INPUT, '%010d' % (time+i) + '.png')
                 inputs[rname] = tf.stack([load_and_preprocess_image(rpath, SHAPE)])
 
-        # visualize images
+        # TODO visualize images
         # visualize_inputs(inputs)
 
         ## get model predictions for the input-images
