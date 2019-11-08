@@ -8,7 +8,8 @@ class Config:
         conf = configparser.ConfigParser()
         conf.read(configfile)
         # set DATASET values
-        self.dataset_files = json.loads(conf['DATASET']['DATASET_FILES'])
+        self.training_files = json.loads(conf['DATASET']['TRAINING_FILES'])
+        self.validation_files = json.loads(conf['DATASET']['VALIDATION_FILES'])
         self.image_shape = json.loads(conf['DATASET']['IMAGE_SHAPE'])
         self.seq_len = int(conf['DATASET']['SEQ_LEN'])
         self.t0 = int(conf['DATASET']['T0'])
@@ -51,7 +52,8 @@ def main():
         print("val: ", s, ", type: ", type(s))
 
     print("DATASET:")
-    my_print(conf.dataset_files)
+    my_print(conf.training_files)
+    my_print(conf.validation_files)
     my_print(conf.image_shape)
     my_print(conf.seq_len)
     my_print(conf.t0)
