@@ -74,7 +74,7 @@ def show_tabbed_plots(pc):
     app.exec_()
     plt.close('all')
 
-def prepare_observations(obs, labels, layernames, seq_len, image_files, label_files, t0, t1):
+def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
     images_batch = obs[0]
     labels_batch = obs[1]
     # roll random batch entry
@@ -100,7 +100,7 @@ def prepare_observations(obs, labels, layernames, seq_len, image_files, label_fi
     # check if label assignment is correct
     print("original label: ", orig_label)
     print("batch label   : ", label)
-    clean_assert((orig_label == label).all(), image_files, label_files)
+    clean_assert((orig_label == label).all(), cleanup_files)
     # reshape observation data
     im_tmp = [ [] for x in range(seq_len) ]
     for im_data in images:
@@ -112,7 +112,7 @@ def prepare_observations(obs, labels, layernames, seq_len, image_files, label_fi
     print("##########")
     return image_data, label
 
-def prepare_observations_keras(obs, labels, layernames, seq_len, image_files, label_files):
+def prepare_observations_keras(obs, labels, layernames, seq_len):
     images_batch = obs[0]
     labels_batch = obs[1]
     # roll random batch entry
@@ -189,14 +189,14 @@ def make_evo_traj_figures(traj_file_path):
     return fig_traj, fig_xyz, fig_rpy
 
 # NOTE set keras_compat=True if tf.dataset is mapped to 'make_keras_compatible', else use keras_compat=False
-def debug_vis(ds_final, labels, layernames, seq_len, image_files, label_files, keras_compat=True):
+def debug_vis(ds_final, labels, layernames, seq_len, keras_compat=True):
     from evo.tools import plot
     for obs in ds_final:
         # make figures for trajectory and observations
         if keras_compat:
-            image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len, image_files, label_files)
+            image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len)
         else:
-            image_data, label = prepare_observations(obs, labels, layernames, seq_len, image_files, label_files, conf.t0, conf.t1)
+            image_data, label = prepare_observations(obs, labels, layernames, seq_len, conf.t0, conf.t1)
         fig_obs = make_observations_figure(image_data, label, seq_len)
         # create temporary pose file which holds 1) identity and 2) relative pose from label
         tmp_file_name = '.tmp_label.txt'
@@ -353,26 +353,20 @@ def rad2deg(x):
     return x * 180.0 / math.pi
 
 # removes unpacked files and exits code
-def cleanup_and_exit(image_files_list, label_files_list):
-    cleanup(image_files_list, label_files_list)
+def cleanup_and_exit(files_list):
+    cleanup(files_list)
     exit()
 
-def cleanup(image_files_list, label_files_list):
+def cleanup(files_list):
     print("[INFO] clean up...", end='', flush=True)
-    # remove extracted image files
-    for image_files in image_files_list:
-        for f in image_files:
-            os.remove(f)
-    # remove extracted label file
-    for label_files in label_files_list:
-        for f in label_files:
-            os.remove(f)
+    for f in files_list:
+        os.remove(f)
     print(" done")
 
 # if cond fails: clean up all extracted files and exit
-def clean_assert(condition, image_files_list, label_files_list):
+def clean_assert(condition, files_list):
     if not condition:
-        cleanup(image_files_list, label_files_list)
+        cleanup(files_list)
         assert(condition) # call assert in order to get typical assert error (lazy code...)
 
 def check_model_layout(model, layernames):
@@ -392,9 +386,9 @@ def check_model_layout(model, layernames):
 
 def signal_handler(sig, frame):
     print("\n[INFO] exit on Ctrl+C")
-    cleanup_and_exit(train_im_files, train_label_files)
+    cleanup_and_exit(cleanup_files)
 
-def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1, _dataset_name):
+def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1, _dataset_name, _cleanup_files):
     ## extract dataset archive
     num_obs_total  = 0
     final_datasets = []
@@ -413,8 +407,10 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
                 filename_ext = fz.extract(im_file, path=_unpack_dir); os.rename(filename_ext, filename);
                 if im_file == 'labels.npz':
                     label_files[i_arch].append(filename)
+                    _cleanup_files.append(filename)
                 else:
                     image_files[i_arch].append(filename)
+                    _cleanup_files.append(filename)
         else:
             # if multiple archives are used it needs to be ensured that all archives holds the same files
             for im_file in image_files[0]:
@@ -423,14 +419,16 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
                     filename     = os.path.join(_unpack_dir, arch_prefix + im_file)
                     filename_ext = fz.extract(im_file, path=_unpack_dir); os.rename(filename_ext, filename);
                     image_files[i_arch].append(filename)
+                    _cleanup_files.append(filename)
                 except KeyError:
                     print("[ERROR] file {} is required but could not be found in {}".format(im_file, _dataset_files[i_arch]))
                     fz.close()
-                    cleanup_and_exit(image_files, label_files)
+                    cleanup_and_exit(_cleanup_files)
             # extract labels
             filename     = os.path.join(_unpack_dir, arch_prefix + 'labels.npz')
             filename_ext = fz.extract('labels.npz', path=_unpack_dir); os.rename(filename_ext, filename);
             label_files[i_arch].append(filename)
+            _cleanup_files.append(filename)
         # close archive
         fz.close()
 
@@ -450,11 +448,11 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
             im_width    = header_record['width'].numpy()
             im_channels = header_record['channels'].numpy()
             image_shape = (im_height, im_width, im_channels)
-            clean_assert(image_shape == tuple(_im_shape_conf), image_files, label_files) # NOTE images in header needs to fit the shape given in config
+            clean_assert(image_shape == tuple(_im_shape_conf), _cleanup_files) # NOTE images in header needs to fit the shape given in config
         else: # for any further archive check if headers are compatible
-            clean_assert(im_height == header_record['height'].numpy(), image_files, label_files)
-            clean_assert(im_width == header_record['width'].numpy(), image_files, label_files)
-            clean_assert(im_channels == header_record['channels'].numpy(), image_files, label_files)
+            clean_assert(im_height == header_record['height'].numpy(), _cleanup_files)
+            clean_assert(im_width == header_record['width'].numpy(), _cleanup_files)
+            clean_assert(im_channels == header_record['channels'].numpy(), _cleanup_files)
         # compute information necessarry for further computation
         num_images       = header_record['num_images'].numpy()
         num_observations = num_images - (_seq_len - 1)
@@ -468,10 +466,10 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
         # NOTE labels are stored as numpy array with shape (OBSERVATION_LENGTH, 6)
         # NOTE accessing: labels[T] returns the 6 dof relative pose from time T to T+1
         labels = np.load(label_files[i_arch][0])['labels']
-        clean_assert(num_images-1 == labels.shape[0], image_files, label_files) # NOTE number of training images must match the number of labels + 1 (since each pair of images needs one label)
+        clean_assert(num_images-1 == labels.shape[0], _cleanup_files) # NOTE number of training images must match the number of labels + 1 (since each pair of images needs one label)
         # prepare labels s.t. user can specify between which 2 timepoints within the sequence the rel. pose should be used as label
         # example: SEQ_LEN=4 -> [_t0,_t1,t2,t3], label_from=[1,2] => use rel. pose from _t1 to t2
-        clean_assert(_seq_len>=2 and _t0<_t1 and _t0>=0 and _t1>0 and _t0<(_seq_len-1) and _t1<_seq_len, image_files, label_files) # NOTE check if _t0,_t1,_seq_len are valid
+        clean_assert(_seq_len>=2 and _t0<_t1 and _t0>=0 and _t1>0 and _t0<(_seq_len-1) and _t1<_seq_len, _cleanup_files) # NOTE check if _t0,_t1,_seq_len are valid
         observation_labels = [ combine(labels[i+_t0 : i+_t1, :]) for i in range(num_observations) ]
         observation_labels = np.array(observation_labels)
         # create tf.data.Dataset object for labels
@@ -533,7 +531,7 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
     # information needed for further processing of dataset
     info = (num_obs_total, layernames)
     # administrative stuff needed for debugging and cleaning up at the end # NOTE TODO when this function belongs to class these things will become class members
-    clean_dbg_stuff = (image_files, label_files, label_list_dbg)
+    clean_dbg_stuff = (_cleanup_files, label_list_dbg)
     # final concatenated dataset: on next() it will return a 2-tuple contaning 1) a n-tuple of n input images and 2) the appropriate label
     return ds_final, info, clean_dbg_stuff
 
@@ -553,12 +551,30 @@ args = parse_args()
 conf = config.Config(args.config)
 
 # make trainaing dataset from tfrec
-ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.dataset_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "training dataset")
-train_obs_total  = train_ds_info[0]; layernames = train_ds_info[1];
-train_im_files = train_ds_meta[0]; train_label_files = train_ds_meta[1]; train_label_list_dbg = train_ds_meta[2];
+print("[INFO] training dataset will be generated from following files:", conf.training_files)
+ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "training dataset", [])
+num_train_obs  = train_ds_info[0]; layernames = train_ds_info[1];
+cleanup_files = train_ds_meta[0]; train_label_list_dbg = train_ds_meta[1];
 
-# TODO load validation dataset if requested
-# TODO assert: check if layernames are consistent with the ones from ds_train
+# load validation dataset if requested
+use_validation_data = True
+if conf.validation_files == []:
+    if conf.validation_split <= 0.0:
+        print("[INFO] no validation files and split set, no validation data will be used during training")
+        use_validation_data = False
+    else:
+        print("[INFO] no validation files set, validation-split fraction will be used instead (frac: {})".format(conf.validation_split))
+        # split the final observations into training and validation sets
+        num_valid_obs  = int(conf.validation_split * num_train_obs)
+        ds_valid = ds_train.take(num_valid_obs)
+        ds_train = ds_train.skip(num_valid_obs)
+else:
+    print("[INFO] validation data is set, validation dataset will be generated from following files:", conf.validation_files)
+    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "validation dataset", cleanup_files)
+    num_valid_obs = valid_ds_info[0]; valid_layernames = valid_ds_info[1];
+    cleanup_files = valid_ds_meta[0]; valid_label_list_dbg = valid_ds_meta[1];
+    # assert: check if layernames are consistent with the ones from ds_train
+    clean_assert(layernames == valid_layernames, cleanup_files)
 
 ## setup dataset pipeline
 # TODO play around with tf.contrib.data functions to make pipeline more effective -> read https://www.tensorflow.org/tutorials/load_data/images#performance
@@ -566,20 +582,22 @@ train_im_files = train_ds_meta[0]; train_label_files = train_ds_meta[1]; train_l
 # NOTE pipeline info: 1) observations are split into training and validation sets 1.5) validation set will be cached in local mem since it is small enough 2) sets are mapped to preprocess function in parallel 3) sets are batched and repeated 4) sets will be prefetched
 print("[INFO] setting up dataset pipeline (i.e. shuffling, batching, etc)...", end='', flush=True)
 # shuffle observations
-if conf.validation_split <= 0.0:
+if not use_validation_data:
     # train on all observations
-    ds_train = ds_train.shuffle(train_obs_total).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    ds_train = ds_train.shuffle(num_train_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                                              .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
 else:
-    # TODO put into functions
-    # split the final observations into training and validation sets
-    num_validation_obs  = int(conf.validation_split * train_obs_total)
     if conf.debug:
         # NOTE do not map 'make_keras_compatible' for debug to get all debug information
-        ds_train_validation = ds_train.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-        ds_train_training   = ds_train.skip(num_validation_obs).shuffle(train_obs_total-num_validation_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        ds_valid = ds_valid.shuffle(num_valid_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                                              .repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        ds_train = ds_train.shuffle(num_train_obs-num_valid_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                                              .repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
     else:
-        ds_train_validation = ds_train.take(num_validation_obs).shuffle(num_validation_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-        ds_train_training   = ds_train.skip(num_validation_obs).shuffle(train_obs_total-num_validation_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        ds_valid = ds_valid.shuffle(num_valid_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                                              .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        ds_train = ds_train.shuffle(num_train_obs-num_valid_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                                              .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
 
 print(" done")
 
@@ -588,19 +606,20 @@ if conf.debug:
     ## visualize data from final dataset with extended debug informations and asserts
     # NOTE comment line where 'make_keras_compatible' is mapped to ds_train
     print("[INFO] visualizing random observations from batched dataset without mapping 'make_keras_compatible' to final_ds...")
-    debug_vis(ds_train_training, train_label_list_dbg, layernames, conf.seq_len, train_im_files, train_label_files, keras_compat=False)
-    cleanup_and_exit(train_im_files, train_label_files)
+    debug_vis(ds_train, train_label_list_dbg, layernames, conf.seq_len, keras_compat=False) # NOTE debug vis on training dataset
+    # debug_vis(ds_valid, valid_label_list_dbg, layernames, conf.seq_len, keras_compat=False) # NOTE debug vis on validation dataset
+    cleanup_and_exit(cleanup_files)
 
     # ## visualize data from final dataset
     # print("[INFO] visualizing random observations from batched final_ds dataset...")
-    # debug_vis(ds_train_training, train_label_list_dbg, layernames, conf.seq_len, train_im_files, train_label_files, keras_compat=True)
-    # cleanup_and_exit(train_im_files, train_label_files)
+    # debug_vis(ds_train_training, train_label_list_dbg, layernames, conf.seq_len, keras_compat=True)
+    # cleanup_and_exit(cleanup_files)
 ## end DEBUG
 
 ## savely load model from config path
 model = tf.keras.models.load_model(conf.model_file)
-clean_assert(check_model_layout(model, layernames), train_im_files, train_label_files)
-# TODO repeat check for validation data
+clean_assert(check_model_layout(model, layernames), cleanup_files)
+# NOTE layernames == valid_layernames is already ensured by assert earlier => validation dataset will be compatible with loaded model
 
 ## print model informations
 print("[INFO] information about the DNN model thats going to be trained:")
@@ -616,22 +635,21 @@ csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(conf.log_dir, 'csv', 'tra
 timestamp_file = str(int(time.time()))
 cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}.ckpt')
 checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, verbose=1, save_freq=conf.checkpoint_freq)
-# NEXT delete: checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, verbose=1) # TODO save_freq not available on tf2.0a
 # TODO check usefull options: mode, save_best_only
 
 ## train model using keras training loop
-if conf.validation_split <= 0.0:
+if not use_validation_data:
     history = model.fit(
         ds_train,
-        steps_per_epoch=train_obs_total/conf.batch_size,
+        steps_per_epoch=num_train_obs/conf.batch_size,
         epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 else:
     history = model.fit(
-        ds_train_training,
-        validation_data=ds_train_validation,
-        validation_steps=num_validation_obs/conf.batch_size,
-        steps_per_epoch=(train_obs_total-num_validation_obs)/conf.batch_size,
+        ds_train,
+        validation_data=ds_valid,
+        validation_steps=num_valid_obs/conf.batch_size,
+        steps_per_epoch=(num_train_obs-num_valid_obs)/conf.batch_size,
         epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 
@@ -641,11 +659,11 @@ model.save(conf.model_out)
 
 print("[INFO] training loss history:")
 print(history.history['loss'])
-if conf.validation_split > 0.0:
+if use_validation_data:
     print("[INFO] validation loss history:")
     print(history.history['val_loss'])
 
 ## clean up
 # remove all extracted files from disk
-cleanup_and_exit(train_im_files, train_label_files)
+cleanup_and_exit(cleanup_files)
 
