@@ -7,8 +7,8 @@ import src.config as config
 tf.compat.v1.enable_eager_execution()
 
 ########################### SAMPLE CONFIG ###########################
-# TRAINED_MODEL = "models/cnn_trained.h5"
-TRAINED_MODEL = "models/deepvo_trained.h5"
+# TRAINED_MODEL = "models/deepvo__in2_seqlen2_imw256_imh256_imc1_out6.h5"
+TRAINED_MODEL = "models/deepvo_trained-20ep.h5"
 LEFT_INPUT    = "/home/claudio/Datasets/CARLA/sequence_00/rgb/left/images"
 # RIGHT_INPUT   = "/home/claudio/Datasets/CARLA/sequence_01/rgb/right/images"
 PRED_FILE     = "predictions/pred_deepvo.txt"
