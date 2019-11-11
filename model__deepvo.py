@@ -71,7 +71,7 @@ def create_model(layernames, image_shape):
     # Conv5_1: kernel=3x3, padding=zeropadding(1,1), stride=(1,1), channels=512, activation=ReLu
     conv5_1 = tf.keras.layers.Conv2D(512, 3, padding='same', strides=1, activation=relu, data_format='channels_last')(conv5)
     # Conv6: kernel=3x3, padding=zeropadding(1,1), stride=(2,2), channels=1024, activation=ReLu
-    conv6 = tf.keras.layers.Conv2D(1024, 3, padding='same', strides=2, activation=relu, data_format='channels_last')(conv5_1)
+    conv6 = tf.keras.layers.Conv2D(1024, 3, padding='same', strides=2, activation=linear, data_format='channels_last')(conv5_1)
 
     ## TODO implement LSTM layers
 
@@ -100,7 +100,7 @@ def main():
     args = parse_args()
     conf = config.Config(args.config)
     # make header for the DNN
-    layernames = make_layernames(conf.dataset_files[0], conf.seq_len)
+    layernames = make_layernames(conf.training_files[0], conf.seq_len)
     # create and compile model
     model = create_model(layernames, conf.image_shape)
     # write model to disk
