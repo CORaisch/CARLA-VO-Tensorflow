@@ -6,7 +6,7 @@ import src.config as config
 
 def parse_args():
     argparser = argparse.ArgumentParser(description="This scripts generates a simple flat perceptron for test usages.")
-    argparser.add_argument('config', help="same config file as used for training with 'train_sequence.py'. Config file is required to set the input layers names as 'train_tfrec.py' expects it. Names will be generated from 'DATASET_FILES' option, so ensure to use this option consistently.")
+    argparser.add_argument('config', help="same config file as used for training with 'train_sequence.py'. Config file is required to set the input layers names as 'train_tfrec.py' expects it. Names will be generated from 'TRAINING_FILES' option, so ensure to use this option consistently.")
     argparser.add_argument('--model_out', '-out', default='', help="path to where the model should be saved.")
     return argparser.parse_args()
 
@@ -46,7 +46,8 @@ def create_model(layernames, image_shape):
     # concatenate output of all input layers to one flat tensor
     x = tf.keras.layers.concatenate(inputs=flatten_layers)
     # make mlp with 6 outpus for the 6 dof poses
-    out = tf.keras.layers.Dense(6, activation='linear')(x) # output layer must have 6 output neurons for the 6 dof poses
+    mid = tf.keras.layers.Dense(1000, activation='relu')(x)
+    out = tf.keras.layers.Dense(6, activation='linear')(mid)
     # set and compile model
     model = tf.keras.models.Model(inputs=input_layers, outputs=out)
     model.compile(optimizer='adam', loss='mean_absolute_error')
@@ -58,7 +59,7 @@ def main():
     args = parse_args()
     conf = config.Config(args.config)
     # make header for the DNN
-    layernames = make_layernames(conf.dataset_files[0], conf.seq_len)
+    layernames = make_layernames(conf.training_files[0], conf.seq_len)
     # create and compile model
     model = create_model(layernames, conf.image_shape)
     # write model to disk
@@ -66,6 +67,7 @@ def main():
              + '_seqlen' + str(conf.seq_len) \
              + '_imw'    + str(conf.image_shape[0]) \
              + '_imh'    + str(conf.image_shape[1]) \
+             + '_imc'    + str(conf.image_shape[2]) \
              + '_out6'   + '.h5'
     model.save(os.path.join(args.model_out, name))
 

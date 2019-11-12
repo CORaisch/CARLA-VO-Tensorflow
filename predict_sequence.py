@@ -1,21 +1,12 @@
+## sample call: python predict_sequence.py ~/Datasets/CARLA/sequence_00/rgb/left/images=rgb_left models/deepvo_trained.h5 configs/local.conf --out deepvo_pred.txt
+
 import tensorflow as tf
 import numpy as np
-import os
+import os, argparse, zipfile
 import src.config as config
 
 # enable eager execution
 tf.compat.v1.enable_eager_execution()
-
-########################### SAMPLE CONFIG ###########################
-# TRAINED_MODEL = "models/deepvo__in2_seqlen2_imw256_imh256_imc1_out6.h5"
-TRAINED_MODEL = "models/deepvo_trained-20ep.h5"
-LEFT_INPUT    = "/home/claudio/Datasets/CARLA/sequence_00/rgb/left/images"
-# RIGHT_INPUT   = "/home/claudio/Datasets/CARLA/sequence_01/rgb/right/images"
-PRED_FILE     = "predictions/pred_deepvo.txt"
-SHAPE         = [256, 256, 1]
-STEREO        = False
-SEQ_LEN       = 2
-
 
 ########################### HELPERS ###########################
 def load_and_preprocess_image(path, shape):
@@ -47,36 +38,59 @@ def visualize_inputs(images):
     # TODO rearrange images
     # TODO visualize in grid
 
+def parse_args():
+    # create argparse instance
+    argparser = argparse.ArgumentParser(description="takes a sequence of images and computes the predictions on the passed, trained DNN.")
+    # add positional arguments
+    argparser.add_argument('sequence', type=str, nargs='*', metavar="\'PATH/TO/IMAGES=LAYERNAME\'", help="sequence on which to compute the predictions")
+    argparser.add_argument('model', type=str, help="file of trained model in .h5 format")
+    argparser.add_argument('config', type=str, help="Config file needs to be passed in order to specify the training setup. See 'configs/sample.conf' for an template.")
+    # add optional arguments
+    argparser.add_argument('--out', '-o', type=str, default=None, help="file where the predictions are stored in (as .txt file). By default it will be saved in the predicitons subdir with the same name as the model file with added \'_pred\' suffix.")
+    argparser.add_argument('--verbose', '-v', type=bool, default=False, help="set to show more information.")
+    # parse args
+    args = argparser.parse_args()
+    # preprocess --out argument
+    if args.out == None:
+        base = args.model.split('/')[-1]
+        extension = base.split('.')[-1]
+        args.out = 'predictions/' + base.split(extension)[0] + 'txt'
+    # postprocess sequence argument
+    args.sequence = { pair.split('=')[0] : pair.split('=')[1] for pair in args.sequence }
+    # return parsed arguments
+    return args
+
 ########################### CODE ###########################
-# force tensorflow to throw its inital messages on the very beginning of that script
+## force tensorflow to throw its inital messages on the very beginning of that script
 tf.config.experimental_list_devices()
 
+## parse arguments
+args = parse_args()
+conf = config.Config(args.config)
+
 ## load model
-print("[INFO] loading model from \'{}\'...".format(TRAINED_MODEL), end='', flush=True)
-model = tf.keras.models.load_model(TRAINED_MODEL)
+print("[INFO] loading model from \'{}\'...".format(args.model), end='', flush=True)
+model = tf.keras.models.load_model(args.model)
 print(" done")
 print("[INFO] information about the DNN model thats going to be evaluated:")
 model.summary()
 
 ## get number of images of current observation
-nimages = len([name for name in os.listdir(LEFT_INPUT) if os.path.isfile(os.path.join(LEFT_INPUT,name))])
+seqpath = list(args.sequence.keys())[0]
+nimages = len([name for name in os.listdir(seqpath) if os.path.isfile(os.path.join(seqpath, name))])
 
 ## load input-images
-with open(PRED_FILE, 'w') as predf:
-    for time in range(0,nimages-(SEQ_LEN-1)):
+with open(args.out, 'w') as predf:
+    for time in range(0, nimages-(conf.seq_len-1)):
         # load input images for current timestep
-        # TODO layernames must be computed from config file to be consistent with rest of data
         inputs = {}
-        for i in range(0,SEQ_LEN):
-            # load left image
-            lname = 'rgb_left_'+str(i)
-            lpath = os.path.join(LEFT_INPUT, '%010d' % (time+i) + '.png')
-            inputs[lname] = tf.stack([load_and_preprocess_image(lpath, SHAPE)])
-            # load right image
-            if STEREO:
-                rname = 'rgb_right_'+str(i)
-                rpath = os.path.join(RIGHT_INPUT, '%010d' % (time+i) + '.png')
-                inputs[rname] = tf.stack([load_and_preprocess_image(rpath, SHAPE)])
+        for t in range(0, conf.seq_len): # for each timestep
+            for i in range(0,len(args.sequence)): # load the appropriate ammount of images (mono, stereo, etc.)
+                # load image
+                seq = list(args.sequence.keys())[i]
+                lname = args.sequence[seq] + '_' + str(t)
+                lpath = os.path.join(seq, '%010d' % (time+t) + '.png')
+                inputs[lname] = tf.stack([load_and_preprocess_image(lpath, conf.image_shape)])
 
         # TODO visualize images
         # visualize_inputs(inputs)
@@ -86,7 +100,11 @@ with open(PRED_FILE, 'w') as predf:
         assert(pred.shape==(1,6)) # prediction must always be 1x6 vector
 
         ## print prediction (serves as status report)
-        print("[INFO] Prediction t={}: {}".format(time, pred[0]))
+        if args.verbose:
+            print("[INFO] Prediction t={}: {}".format(time, pred[0]))
+        else:
+            progress = int(100.0*(time/nimages))
+            print("[INFO] Progress {}%".format(progress), end='\r', flush=True)
 
         ## write prediction to file
         write_pred_to_file(predf, pred[0])
