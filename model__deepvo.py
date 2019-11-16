@@ -88,11 +88,8 @@ def create_model(layernames, image_shape):
     # add final dense layer: input_shape=hidden_n, output_shap=6 (trans. + euler)
     out = tf.keras.layers.Dense(6, activation=linear)(dense_1)
 
-    ## compile model
+    ## return untrained model
     model = tf.keras.models.Model(inputs=input_layers, outputs=out)
-    model.compile(optimizer=adam, loss=mae)
-
-    ## return compiled, untrained model
     return model
 
 def main():
