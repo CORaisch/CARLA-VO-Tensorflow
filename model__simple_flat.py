@@ -50,7 +50,6 @@ def create_model(layernames, image_shape):
     out = tf.keras.layers.Dense(6, activation='linear')(mid)
     # set and compile model
     model = tf.keras.models.Model(inputs=input_layers, outputs=out)
-    model.compile(optimizer='adam', loss='mean_absolute_error')
     # return compiled model
     return model
 

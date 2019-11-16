@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import os, sys, glob, signal, time, math, argparse, zipfile
 import src.config as config
+import src.losses as custom_losses
 
 # run eager execution
 tf.compat.v1.enable_eager_execution()
@@ -616,10 +617,11 @@ if conf.debug:
     # cleanup_and_exit(cleanup_files)
 ## end DEBUG
 
-## savely load model from config path
-model = tf.keras.models.load_model(conf.model_file)
+## load and compile model from config path
+model = tf.keras.models.load_model(conf.model_file, compile=False)
+model.compile(optimizer='adam', loss=custom_losses.mse)
 clean_assert(check_model_layout(model, layernames), cleanup_files)
-# NOTE layernames == valid_layernames is already ensured by assert earlier => validation dataset will be compatible with loaded model
+# NOTE layernames == valid_layernames! this was already ensured by assert earlier => validation dataset will be compatible with loaded model
 
 ## print model informations
 print("[INFO] information about the DNN model thats going to be trained:")
