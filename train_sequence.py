@@ -536,6 +536,17 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
     # final concatenated dataset: on next() it will return a 2-tuple contaning 1) a n-tuple of n input images and 2) the appropriate label
     return ds_final, info, clean_dbg_stuff
 
+# TODO play around with tf.contrib.data functions to make pipeline more effective -> read https://www.tensorflow.org/tutorials/load_data/images#performance
+# TODO set size of shuffle_buffer s.t. it fits into local mem -> make it independent from num_images (maybe tf.data.experimental can help)
+def setup_dataset_pipeline(ds, batch_size, shuffle_buf_len, debug=False):
+    # NOTE 1) shuffle dataset, 2) cache data in memory, 3) map compatability function, 4) batch dataset 5) repeat dataset infinitly, 6) make dataset prefetchable
+    if debug:
+        ds = ds.shuffle(shuffle_buf_len).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                .batch(batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    else:
+        ds = ds.shuffle(shuffle_buf_len).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                .batch(batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    return ds
 
 ###################### test code ######################
 # force tensorflow to throw its inital messages on the very beginning of that script
@@ -563,12 +574,15 @@ if conf.validation_files == []:
     if conf.validation_split <= 0.0:
         print("[INFO] no validation files and split set, no validation data will be used during training")
         use_validation_data = False
+        train_shuffle_buffer_length = num_train_obs
     else:
         print("[INFO] no validation files set, validation-split fraction will be used instead (frac: {})".format(conf.validation_split))
         # split the final observations into training and validation sets
         num_valid_obs  = int(conf.validation_split * num_train_obs)
         ds_valid = ds_train.take(num_valid_obs)
         ds_train = ds_train.skip(num_valid_obs)
+        train_shuffle_buffer_length = num_train_obs - num_valid_obs
+        valid_shuffle_buffer_length = num_valid_obs
 else:
     print("[INFO] validation data is set, validation dataset will be generated from following files:", conf.validation_files)
     ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "validation dataset", cleanup_files)
@@ -576,30 +590,19 @@ else:
     cleanup_files = valid_ds_meta[0]; valid_label_list_dbg = valid_ds_meta[1];
     # assert: check if layernames are consistent with the ones from ds_train
     clean_assert(layernames == valid_layernames, cleanup_files)
+    train_shuffle_buffer_length = num_train_obs
+    valid_shuffle_buffer_length = num_valid_obs
 
 ## setup dataset pipeline
-# TODO play around with tf.contrib.data functions to make pipeline more effective -> read https://www.tensorflow.org/tutorials/load_data/images#performance
-# TODO set size of shuffle_buffer s.t. it fits into local mem -> make it independent from num_images (maybe tf.data.experimental can help)
 # NOTE pipeline info: 1) observations are split into training and validation sets 1.5) validation set will be cached in local mem since it is small enough 2) sets are mapped to preprocess function in parallel 3) sets are batched and repeated 4) sets will be prefetched
 print("[INFO] setting up dataset pipeline (i.e. shuffling, batching, etc)...", end='', flush=True)
 # shuffle observations
 if not use_validation_data:
     # train on all observations
-    ds_train = ds_train.shuffle(num_train_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                                              .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    ds_train = setup_dataset_pipeline(ds_train, conf.batch_size, train_shuffle_buffer_length, debug=conf.debug)
 else:
-    if conf.debug:
-        # NOTE do not map 'make_keras_compatible' for debug to get all debug information
-        ds_valid = ds_valid.shuffle(num_valid_obs).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                                              .repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-        ds_train = ds_train.shuffle(num_train_obs-num_valid_obs).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                                              .repeat().batch(conf.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-    else:
-        ds_valid = ds_valid.shuffle(num_valid_obs).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                                              .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-        ds_train = ds_train.shuffle(num_train_obs-num_valid_obs).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                                              .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-
+    ds_train = setup_dataset_pipeline(ds_train, conf.batch_size, train_shuffle_buffer_length, debug=conf.debug)
+    ds_valid = setup_dataset_pipeline(ds_valid, conf.batch_size, valid_shuffle_buffer_length, debug=conf.debug)
 print(" done")
 
 ## beg DEBUG visualize data without keras compatability
@@ -638,20 +641,21 @@ timestamp_file = str(int(time.time()))
 cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}.ckpt')
 checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, verbose=1, save_freq=conf.checkpoint_freq)
 # TODO check usefull options: mode, save_best_only
+# TODO use learningRateScheduler callback
 
 ## train model using keras training loop
 if not use_validation_data:
     history = model.fit(
         ds_train,
-        steps_per_epoch=num_train_obs/conf.batch_size,
+        steps_per_epoch=train_shuffle_buffer_length/conf.batch_size,
         epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 else:
     history = model.fit(
         ds_train,
         validation_data=ds_valid,
-        validation_steps=num_valid_obs/conf.batch_size,
-        steps_per_epoch=(num_train_obs-num_valid_obs)/conf.batch_size,
+        validation_steps=valid_shuffle_buffer_length/conf.batch_size,
+        steps_per_epoch=train_shuffle_buffer_length/conf.batch_size,
         epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 
