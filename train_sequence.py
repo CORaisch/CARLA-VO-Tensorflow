@@ -320,7 +320,7 @@ def mat2string(mat):
     return ret
 
 # extracts euler angles from rotation matrix
-# NOTE rotation matrix must be composed according to XYZ (roll-pitch-yaw) convention as in function euler2mat
+# NOTE rotation matrix must be composed according to ZYX (yaw-pitch-roll) convention as in function euler2mat
 # NOTE results are only valid iff roll and yaw angles are in range [-pi,pi] and pitch is in range [-pi/2,pi/2]
 # NOTE function will return 2 solutions in the regular case and 1 sample solution from infinity many in the gimbal lock case
 def rot2euler(R):
