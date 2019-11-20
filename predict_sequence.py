@@ -48,6 +48,7 @@ def parse_args():
     # add optional arguments
     argparser.add_argument('--out', '-o', type=str, default=None, help="file where the predictions are stored in (as .txt file). By default it will be saved in the predicitons subdir with the same name as the model file with added \'_pred\' suffix.")
     argparser.add_argument('--verbose', '-v', type=bool, default=False, help="set to show more information.")
+    argparser.add_argument('--kitti', '-kitti', action='store_true', help="set to True if predicting on KITTI sequence")
     # parse args
     args = argparser.parse_args()
     # preprocess --out argument
@@ -89,7 +90,11 @@ with open(args.out, 'w') as predf:
                 # load image
                 seq = list(args.sequence.keys())[i]
                 lname = args.sequence[seq] + '_' + str(t)
-                lpath = os.path.join(seq, '%010d' % (time+t) + '.png')
+                if args.kitti:
+                    pstr = '%06d'
+                else:
+                    pstr = '%010d'
+                lpath = os.path.join(seq, pstr % (time+t) + '.png')
                 inputs[lname] = tf.stack([load_and_preprocess_image(lpath, conf.image_shape)])
 
         # TODO visualize images
