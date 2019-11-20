@@ -30,7 +30,8 @@ def parse_args():
     args.inputmap = { pair.split('=')[0] : pair.split('=')[1] for pair in args.inputmap }
     # crop extension of archive name if exists
     # NOTE assuming no points in name except for extension
-    tmp = args.archive_name.split('.')[0]
+    print(os.path.isabs(args.archive_name))
+    args.archive_name = args.archive_name.split('.')[0]
     # return parsed arguments
     return args
 
