@@ -567,6 +567,8 @@ print("[INFO] training dataset will be generated from following files:", conf.tr
 ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "training dataset", [])
 num_train_obs  = train_ds_info[0]; layernames = train_ds_info[1];
 cleanup_files = train_ds_meta[0]; train_label_list_dbg = train_ds_meta[1];
+# NOTE ds_train.shape: ((all input images), (label)) -> ((im_l_0, im_r_0 im_l_1, im_r_1, .., im_l_(seq_len), im_r_(seq_len)), (tx,ty,tz,roll,pitch,yaw))
+# NOTE ds_train.shape mono case (most often used): ((im_l_0, im_l_1), (tx,ty,tz,roll,pitch,yaw))
 
 # load validation dataset if requested
 use_validation_data = True

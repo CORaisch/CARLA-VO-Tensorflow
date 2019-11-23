@@ -30,7 +30,6 @@ def parse_args():
     args.inputmap = { pair.split('=')[0] : pair.split('=')[1] for pair in args.inputmap }
     # crop extension of archive name if exists
     # NOTE assuming no points in name except for extension
-    print(os.path.isabs(args.archive_name))
     args.archive_name = args.archive_name.split('.')[0]
     # return parsed arguments
     return args
@@ -108,7 +107,7 @@ def write_images_to_tfrec(paths, filename, inputshape, archname, compression_typ
             tf_example = make_image_record(path, inputshape, archname)
             writer.write(tf_example.SerializeToString())
 
-# NOTE record format: {'id' : TIME, 'image' : SERIALIZED_IMAGE}
+# NOTE record format: {'id' : ARCHNAME_IDX, 'image' : SERIALIZED_IMAGE}
 def make_image_record(path, shape, prefix):
     # load and rescale image (rescaling controlled by user)
     image = load_and_preprocess_image(path, shape)

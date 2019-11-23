@@ -44,7 +44,7 @@ def create_model(layernames, image_shape):
     mae    = tf.keras.losses.MeanAbsoluteError()
     adam   = tf.keras.optimizers.Adam()
 
-    ## compute input layer
+    ## build input layers
     # collect all input images in list
     input_layers   = []
     for layername in layernames:
@@ -53,7 +53,7 @@ def create_model(layernames, image_shape):
     # stack input layers s.t. all images are stacked together at their channel-dimension
     input_stacked = tf.keras.layers.concatenate(inputs=input_layers, axis=-1)
 
-    ## add convolution layers
+    ## add FlowNet convolution layers: https://lmb.informatik.uni-freiburg.de/Publications/2015/DFIB15/flownet.pdf
     # Conv1: kernel=7x7, padding=zeropadding(3,3), stride=(2,2), channels=64, activation=ReLu
     conv1 = tf.keras.layers.Conv2D(64, 7, padding='same', strides=2, activation=relu, data_format='channels_last')(input_stacked)
     # Conv2: kernel=5x5, padding=zeropadding(2,2), stride=(2,2), channels=128, activation=ReLu
