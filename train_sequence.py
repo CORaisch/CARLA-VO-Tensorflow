@@ -193,6 +193,7 @@ def make_evo_traj_figures(traj_file_path):
 def debug_vis(ds_final, labels, layernames, seq_len, keras_compat=True):
     from evo.tools import plot
     for obs in ds_final:
+        ## TODO here concatenation could be tested! -> take both inputlayers batches and concat at image-channel dimension, then visualize
         # make figures for trajectory and observations
         if keras_compat:
             image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len)
