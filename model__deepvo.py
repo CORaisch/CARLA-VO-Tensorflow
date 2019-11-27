@@ -51,7 +51,10 @@ def create_model(layernames, image_shape):
         input_layer = tf.keras.layers.Input(shape=image_shape, name=layername)
         input_layers.append(input_layer)
     # stack input layers s.t. all images are stacked together at their channel-dimension
+    # TODO verify that stacking batches (of sequences) of images results in the same tensor as stacking the two input images beforehand
     input_stacked = tf.keras.layers.concatenate(inputs=input_layers, axis=-1)
+
+    # TODO wrap Convolution layers into TimeDistributions
 
     ## add FlowNet convolution layers: https://lmb.informatik.uni-freiburg.de/Publications/2015/DFIB15/flownet.pdf
     # Conv1: kernel=7x7, padding=zeropadding(3,3), stride=(2,2), channels=64, activation=ReLu

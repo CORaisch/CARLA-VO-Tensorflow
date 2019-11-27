@@ -280,6 +280,31 @@ def make_debug_compatible(*records):
     ret = (tuple([parse_image_record(raw_image) for i, raw_image in enumerate(records[0])]), records[1])
     return ret
 
+# TODO implement debug version
+def subsequence_ds(ds, window_size, shift=1, stride=1, debug=False):
+    def map_to_parsed(*sub):
+        # TODO here would be best place for stacking up images (if needed)
+        return (tuple([parse_image_record(raw_image)[1] for raw_image in sub[0]]), sub[1])
+
+    def map_to_batch(*sub):
+            return tf.data.Dataset.zip((
+                   tf.data.Dataset.zip(tuple([seq_ds.batch(window_size) for seq_ds in sub[0]])),
+                   sub[1].batch(window_size)))
+
+    def map_to_dict(*sub):
+        return ({ layernames[i] : sequence for i, sequence in enumerate(sub[0]) }, sub[1])
+
+    ## map: parse images => ((serialized_im_0, ..., serialized_im_n), label) -> ((image_0, ..., image_n), label)
+    ds = ds.map(map_to_parsed)
+    ## slice ds into ds of subsequenced datasets: ((image_0, ..., image_n), label) -> ((image_sequence_ds_in_0, ..., image_sequence_ds_in_n), label_ds_sequence)
+    ds = ds.window(window_size, shift, stride, drop_remainder=True)
+    ## map: from dataset of subsequence-datasets to dataset of subsequence-arrays:
+    ## ((image_sequence_ds_in_0, ..., image_sequence_ds_in_n), label_ds_sequence) -> ((image_sequence_in_0, ..., image_sequence_in_n), label_sequence)
+    ds = ds.flat_map(map_to_batch)
+    ## map: ((image_sequence_in_0, ..., image_sequence_in_n), label_sequence) -> ({layername_i : image_sequence_in_i}, label_sequence)
+    ds = ds.map(map_to_dict)
+    return ds
+
 # NOTE combines 6 dof transformations (tx,ty,tz,r,p,y)
 def combine(labels):
     # iterate 1st dim of labels (shape: (n,6)) and add 6 dof values
@@ -538,14 +563,23 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
 
 # TODO play around with tf.contrib.data functions to make pipeline more effective -> read https://www.tensorflow.org/tutorials/load_data/images#performance
 # TODO set size of shuffle_buffer s.t. it fits into local mem -> make it independent from num_images (maybe tf.data.experimental can help)
-def setup_dataset_pipeline(ds, batch_size, shuffle_buf_len, debug=False):
+def setup_dataset_pipeline(ds, conf, shuffle_buf_len, debug=False, subsequencing=False):
     # NOTE 1) shuffle dataset, 2) cache data in memory, 3) map compatability function, 4) batch dataset 5) repeat dataset infinitly, 6) make dataset prefetchable
     if debug:
-        ds = ds.shuffle(shuffle_buf_len).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                .batch(batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        if subsequencing:
+            print("[ERROR] TODO implement debug visualization for subsequenced dataset")
+            cleanup_and_exit(cleanup_files)
+            ds = subsequence_ds(ds, conf.subsequence_len, conf.subsequence_shift, conf.subsequence_stride, debug=True).shuffle(shuffle_buf_len).cache()\
+                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        else:
+            ds = ds.shuffle(shuffle_buf_len).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    elif subsequencing:
+        ds = subsequence_ds(ds, conf.subsequence_len, conf.subsequence_shift, conf.subsequence_stride).shuffle(shuffle_buf_len).cache()\
+                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     else:
         ds = ds.shuffle(shuffle_buf_len).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                .batch(batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     return ds
 
 ###################### test code ######################
@@ -573,39 +607,45 @@ cleanup_files = train_ds_meta[0]; train_label_list_dbg = train_ds_meta[1];
 # load validation dataset if requested
 use_validation_data = True
 if conf.validation_files == []:
+    # case: no validation files set
     if conf.validation_split <= 0.0:
+        # case: no validation files and no validation split set
         print("[INFO] no validation files and split set, no validation data will be used during training")
         use_validation_data = False
-        train_shuffle_buffer_length = num_train_obs
+        train_dataset_length = num_train_obs
     else:
+        # case: no validation files but validation split set
         print("[INFO] no validation files set, validation-split fraction will be used instead (frac: {})".format(conf.validation_split))
         # split the final observations into training and validation sets
         num_valid_obs  = int(conf.validation_split * num_train_obs)
         ds_valid = ds_train.take(num_valid_obs)
         ds_train = ds_train.skip(num_valid_obs)
-        train_shuffle_buffer_length = num_train_obs - num_valid_obs
-        valid_shuffle_buffer_length = num_valid_obs
+        train_dataset_length = num_train_obs - num_valid_obs
+        valid_dataset_length = num_valid_obs
 else:
+    # case: validation files set
     print("[INFO] validation data is set, validation dataset will be generated from following files:", conf.validation_files)
     ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "validation dataset", cleanup_files)
     num_valid_obs = valid_ds_info[0]; valid_layernames = valid_ds_info[1];
     cleanup_files = valid_ds_meta[0]; valid_label_list_dbg = valid_ds_meta[1];
     # assert: check if layernames are consistent with the ones from ds_train
     clean_assert(layernames == valid_layernames, cleanup_files)
-    train_shuffle_buffer_length = num_train_obs
-    valid_shuffle_buffer_length = num_valid_obs
+    train_dataset_length = num_train_obs
+    valid_dataset_length = num_valid_obs
 
 ## setup dataset pipeline
 # NOTE pipeline info: 1) observations are split into training and validation sets 1.5) validation set will be cached in local mem since it is small enough 2) sets are mapped to preprocess function in parallel 3) sets are batched and repeated 4) sets will be prefetched
 print("[INFO] setting up dataset pipeline (i.e. shuffling, batching, etc)...", end='', flush=True)
 # shuffle observations
+use_subsequencing = conf.subsequence_len > 1
 if not use_validation_data:
     # train on all observations
-    ds_train = setup_dataset_pipeline(ds_train, conf.batch_size, train_shuffle_buffer_length, debug=conf.debug)
+    ds_train = setup_dataset_pipeline(ds_train, conf, min(train_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
 else:
-    ds_train = setup_dataset_pipeline(ds_train, conf.batch_size, train_shuffle_buffer_length, debug=conf.debug)
-    ds_valid = setup_dataset_pipeline(ds_valid, conf.batch_size, valid_shuffle_buffer_length, debug=conf.debug)
+    ds_train = setup_dataset_pipeline(ds_train, conf, min(train_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
+    ds_valid = setup_dataset_pipeline(ds_valid, conf, min(valid_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
 print(" done")
+print("[INFO] final tf.data.Dataset format: {}".format(ds_train))
 
 ## beg DEBUG visualize data without keras compatability
 if conf.debug:
@@ -649,15 +689,15 @@ checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename,
 if not use_validation_data:
     history = model.fit(
         ds_train,
-        steps_per_epoch=train_shuffle_buffer_length/conf.batch_size,
+        steps_per_epoch=train_dataset_length/conf.batch_size,
         epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 else:
     history = model.fit(
         ds_train,
         validation_data=ds_valid,
-        validation_steps=valid_shuffle_buffer_length/conf.batch_size,
-        steps_per_epoch=train_shuffle_buffer_length/conf.batch_size,
+        validation_steps=valid_dataset_length/conf.batch_size,
+        steps_per_epoch=train_dataset_length/conf.batch_size,
         epochs=conf.epoches,
         callbacks=[csv_logger, tb_logger, checkpoint_callback])
 
