@@ -8,3 +8,4 @@ job.*
 nvidia_out.txt
 configs/local.conf
 configs/cluster.conf
+docs/ipynb_checkpoints
