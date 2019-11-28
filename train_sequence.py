@@ -87,16 +87,32 @@ def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
     images = []
     orig_label_written = False
     for i, im_class in enumerate(images_batch):
-        im_dbg_info = im_class[0][batch_idx].numpy().decode('utf-8')
-        im_no = im_dbg_info.split('_')[-1]
-        im_id = im_dbg_info.split(im_no)[0]
+        # distinguish subsequenced from scalar data
+        if len(im_class[0].numpy().shape) == 2:
+            im_no = []
+            im_id = []
+            for t in range(im_class[0][batch_idx].shape[0]):
+                name = im_class[0][batch_idx][t].numpy().decode('utf-8')
+                im_no.append(name.split('_')[-1])
+                im_id.append(name.split(im_no[-1])[0])
+            im_no = np.array(im_no); im_id = np.array(im_id);
+        else:
+            im_dbg_info = im_class[0][batch_idx].numpy().decode('utf-8')
+            im_no = im_dbg_info.split('_')[-1]
+            im_id = im_dbg_info.split(im_no)[0]
         image = im_class[1][batch_idx].numpy()
         layer = layernames[i]
         images.append( (layer, im_no, image) )
         # pick original label for checking -> orig label == labels[T] where T is earliest time point in image ids
         if not orig_label_written and int(layer.split('_')[-1]) == 0:
-            print("observation starting at t = {} (dataset: {})".format(im_no, im_id[:-1]))
-            orig_label = combine(labels[im_id][int(im_no)+t0 : int(im_no)+t1, :])
+            if type(im_id) is np.ndarray:
+                # check if all images from subsequence are from same original sequence
+                clean_assert((im_id == im_id[0]).any() , cleanup_files)
+                print("observation sequence from t = {} to t = {} (dataset: {})".format(im_no[0], im_no[-1], im_id[0][:-1]))
+                orig_label = [ combine(labels[im_id[k]][int(im_no[k])+t0 : int(im_no[k])+t1, :]) for k in range(len(im_id)) ]
+            else:
+                print("observation starting at t = {} (dataset: {})".format(im_no, im_id[:-1]))
+                orig_label = combine(labels[im_id][int(im_no)+t0 : int(im_no)+t1, :])
             orig_label_written = True
     # check if label assignment is correct
     print("original label: ", orig_label)
@@ -107,14 +123,18 @@ def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
     for im_data in images:
         name = im_data[0]
         t    = int(name.split('_')[-1])
-        im_tmp[t].append( (im_data[2], name+"\n(t = {})".format(int(im_data[1]))) )
+        if len(im_class[0].numpy().shape) == 2:
+            names = np.array([ name+"\n(t = {})".format(int(im_data[1][i])) for i in range(im_data[1].shape[0]) ])
+        else:
+            names = name+"\n(t = {})".format(int(im_data[1]))
+        im_tmp[t].append( (im_data[2], names) )
     # flatten im_tmp list
     image_data = [ e for sub in im_tmp for e in sub ]
     print("##########")
     return image_data, label
 
 def prepare_observations_keras(obs, labels, layernames, seq_len):
-    images_batch = obs[0]
+    input_data = obs[0]
     labels_batch = obs[1]
     # roll random batch entry
     batch_sz  = len(obs[1])
@@ -123,16 +143,21 @@ def prepare_observations_keras(obs, labels, layernames, seq_len):
     label = labels_batch[batch_idx].numpy()
     # collect associated batch images
     images = []
-    for i, (layername, im) in enumerate(images_batch.items()):
+    for i, (layername, im) in enumerate(input_data.items()):
         image = im[batch_idx].numpy()
         layer = layername
         images.append( (layer, image) )
-    # visualize observation
+    # reformat data
     im_tmp = [ [] for x in range(seq_len) ]
     for im_data in images:
         name = im_data[0]
         t    = int(name.split('_')[-1])
-        im_tmp[t].append( (im_data[1], name) )
+        # distinguish subsequenced from scalar data
+        if len(im_data[1].shape) == 4:
+            names = np.array([ name for i in range(im_data[1].shape[0]) ])
+        else:
+            names = name
+        im_tmp[t].append( (im_data[1], names) )
     # flatten im_tmp list
     image_data = [ e for sub in im_tmp for e in sub ]
     return image_data, label
@@ -189,32 +214,52 @@ def make_evo_traj_figures(traj_file_path):
     # return figures
     return fig_traj, fig_xyz, fig_rpy
 
-# NOTE set keras_compat=True if tf.dataset is mapped to 'make_keras_compatible', else use keras_compat=False
-def debug_vis(ds_final, labels, layernames, seq_len, keras_compat=True):
+def show_debug_figure(image_data, label, seq_len):
     from evo.tools import plot
-    for obs in ds_final:
+    fig_obs = make_observations_figure(image_data, label, seq_len)
+    # create temporary pose file which holds 1) identity and 2) relative pose from label
+    tmp_file_name = '.tmp_label.txt'
+    with open(tmp_file_name, 'w') as f:
+        f.write(mat2string(np.eye(4, dtype=np.float64)) + mat2string(euler2mat(label)))
+    fig_traj, fig_xyz, fig_rpy = make_evo_traj_figures(tmp_file_name)
+    # remove temporary pose file
+    os.remove(tmp_file_name)
+    # add figures to evo::plot_collection instance
+    plot_collection = plot.PlotCollection("evo_traj - trajectory plot")
+    plot_collection.add_figure("observations", fig_obs)
+    plot_collection.add_figure("trajectories", fig_traj)
+    plot_collection.add_figure("xyz_view", fig_xyz)
+    plot_collection.add_figure("rpy_view", fig_rpy)
+    # show all plots in tabbed window
+    show_tabbed_plots(plot_collection)
+
+# NOTE set keras_compat=True if tf.dataset is mapped to 'make_keras_compatible', else use keras_compat=False
+def debug_vis(ds, labels, layernames, seq_len):
+    for obs in ds:
         ## TODO here concatenation could be tested! -> take both inputlayers batches and concat at image-channel dimension, then visualize
+        # check which dataset version is loaded (final or debug)
+        keras_compat = type(obs[0]) is dict
         # make figures for trajectory and observations
         if keras_compat:
             image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len)
         else:
             image_data, label = prepare_observations(obs, labels, layernames, seq_len, conf.t0, conf.t1)
-        fig_obs = make_observations_figure(image_data, label, seq_len)
-        # create temporary pose file which holds 1) identity and 2) relative pose from label
-        tmp_file_name = '.tmp_label.txt'
-        with open(tmp_file_name, 'w') as f:
-            f.write(mat2string(np.eye(4, dtype=np.float64)) + mat2string(euler2mat(label)))
-        fig_traj, fig_xyz, fig_rpy = make_evo_traj_figures(tmp_file_name)
-        # remove temporary pose file
-        os.remove(tmp_file_name)
-        # add figures to evo::plot_collection instance
-        plot_collection = plot.PlotCollection("evo_traj - trajectory plot")
-        plot_collection.add_figure("observations", fig_obs)
-        plot_collection.add_figure("trajectories", fig_traj)
-        plot_collection.add_figure("xyz_view", fig_xyz)
-        plot_collection.add_figure("rpy_view", fig_rpy)
-        # show all plots in tabbed window
-        show_tabbed_plots(plot_collection)
+        # check if image_data contains sequences or single images
+        if len(image_data[0][0].shape) == 4:
+            # iterate sequence
+            subseq_len = image_data[0][0].shape[0]
+            print("\n[INFO] iterate next sequence:")
+            for i in range(subseq_len):
+                print("observation no. {}/{}".format(i+1,subseq_len))
+                # extract one observation from sequence:
+                # [((t,w,h,c), 'rgb_left_0'), ((t,w,h,c), 'rgb_left_1)] -> [((w,h,c), 'rgb_left_0'), ((w,h,c), 'rgb_left_1)]
+                images_from_seq = [ (im_seq[i,:,:,:], name_seq[i]) for (im_seq, name_seq) in image_data ]
+                # extract one label from sequence: (t,6) -> (6,)
+                label_from_seq = label[i,:]
+                show_debug_figure(images_from_seq, label_from_seq, seq_len)
+        else:
+            # show singel observation
+            show_debug_figure(image_data, label, seq_len)
 
 
 ###################### helpers ######################
@@ -283,8 +328,15 @@ def make_debug_compatible(*records):
 
 # TODO implement debug version
 def subsequence_ds(ds, window_size, shift=1, stride=1, debug=False):
-    def map_to_parsed(*sub):
-        # TODO here would be best place for stacking up images (if needed)
+    def map_to_parsed_tuple(*sub):
+        return (tuple([parse_image_record(raw_image) for raw_image in sub[0]]), sub[1])
+
+    def map_to_batch_dbg(*sub):
+            return tf.data.Dataset.zip((
+                   tf.data.Dataset.zip(tuple([tf.data.Dataset.zip(seq_ds).batch(window_size) for seq_ds in sub[0]])),
+                   sub[1].batch(window_size)))
+
+    def map_to_parsed_image(*sub):
         return (tuple([parse_image_record(raw_image)[1] for raw_image in sub[0]]), sub[1])
 
     def map_to_batch(*sub):
@@ -295,15 +347,24 @@ def subsequence_ds(ds, window_size, shift=1, stride=1, debug=False):
     def map_to_dict(*sub):
         return ({ layernames[i] : sequence for i, sequence in enumerate(sub[0]) }, sub[1])
 
-    ## map: parse images => ((serialized_im_0, ..., serialized_im_n), label) -> ((image_0, ..., image_n), label)
-    ds = ds.map(map_to_parsed)
+    if debug:
+        ## debug case, map: parse images tuple => ((serialized_im_0, ..., serialized_im_n), label) -> (((image_0, meta), ..., (image_n, meta)), label)
+        ds = ds.map(map_to_parsed_tuple)
+    else:
+        ## training case, map: parse images => ((serialized_im_0, ..., serialized_im_n), label) -> ((image_0, ..., image_n), label)
+        ds = ds.map(map_to_parsed_image)
     ## slice ds into ds of subsequenced datasets: ((image_0, ..., image_n), label) -> ((image_sequence_ds_in_0, ..., image_sequence_ds_in_n), label_ds_sequence)
     ds = ds.window(window_size, shift, stride, drop_remainder=True)
-    ## map: from dataset of subsequence-datasets to dataset of subsequence-arrays:
-    ## ((image_sequence_ds_in_0, ..., image_sequence_ds_in_n), label_ds_sequence) -> ((image_sequence_in_0, ..., image_sequence_in_n), label_sequence)
-    ds = ds.flat_map(map_to_batch)
-    ## map: ((image_sequence_in_0, ..., image_sequence_in_n), label_sequence) -> ({layername_i : image_sequence_in_i}, label_sequence)
-    ds = ds.map(map_to_dict)
+    if debug:
+        ## debug case, map: (((image_sequence_ds_0, meta_sequence_ds_0), ..., (image_sequence_ds_n, meta_sequence_ds_n)), label) -> (((image_sequence_in_0, meta_sequence_0), ..., (image_sequence_in_n, meta_sequence_n)), label_sequence)
+        ds = ds.flat_map(map_to_batch_dbg)
+    else:
+        ## debug case, map: from dataset of subsequence-datasets to dataset of subsequence-arrays:
+        ## ((image_sequence_ds_in_0, ..., image_sequence_ds_in_n), label_ds_sequence) -> ((image_sequence_in_0, ..., image_sequence_in_n), label_sequence)
+        ds = ds.flat_map(map_to_batch)
+    if not debug:
+        ## training case, map: ((image_sequence_in_0, ..., image_sequence_in_n), label_sequence) -> ({layername_i : image_sequence_in_i}, label_sequence)
+        ds = ds.map(map_to_dict)
     return ds
 
 # NOTE combines 6 dof transformations (tx,ty,tz,r,p,y)
@@ -536,6 +597,7 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
         del ds
         print(" done")
 
+    # FIXME subsequencing must happen alredy here to prevent falsy windows
     # concatenate all tf.data.Datasets from _dataset_files to one long tf.data.Dataset
     print("[INFO] concatenating {} datasets to dataset with {} observations...".format(len(final_datasets), num_obs_total), end='', flush=True)
     ds_final = final_datasets[0]
@@ -566,10 +628,9 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
 # TODO set size of shuffle_buffer s.t. it fits into local mem -> make it independent from num_images (maybe tf.data.experimental can help)
 def setup_dataset_pipeline(ds, conf, shuffle_buf_len, debug=False, subsequencing=False):
     # NOTE 1) shuffle dataset, 2) cache data in memory, 3) map compatability function, 4) batch dataset 5) repeat dataset infinitly, 6) make dataset prefetchable
+    # FIXME subsequencing must already happen in 'tfrec_to_ds', but then this function needs to be adjusted also
     if debug:
         if subsequencing:
-            print("[ERROR] TODO implement debug visualization for subsequenced dataset")
-            cleanup_and_exit(cleanup_files)
             ds = subsequence_ds(ds, conf.subsequence_len, conf.subsequence_shift, conf.subsequence_stride, debug=True).shuffle(shuffle_buf_len).cache()\
                 .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
         else:
@@ -650,17 +711,10 @@ print("[INFO] final tf.data.Dataset format: {}".format(ds_train))
 
 ## beg DEBUG visualize data without keras compatability
 if conf.debug:
-    ## visualize data from final dataset with extended debug informations and asserts
-    # NOTE comment line where 'make_keras_compatible' is mapped to ds_train
-    print("[INFO] visualizing random observations from batched dataset without mapping 'make_keras_compatible' to final_ds...")
-    debug_vis(ds_train, train_label_list_dbg, layernames, conf.seq_len, keras_compat=False) # NOTE debug vis on training dataset
-    # debug_vis(ds_valid, valid_label_list_dbg, layernames, conf.seq_len, keras_compat=False) # NOTE debug vis on validation dataset
+    ## visualize data from final dataset
+    print("[INFO] visualizing random observations from batched final dataset...")
+    debug_vis(ds_train, train_label_list_dbg, layernames, conf.seq_len)
     cleanup_and_exit(cleanup_files)
-
-    # ## visualize data from final dataset
-    # print("[INFO] visualizing random observations from batched final_ds dataset...")
-    # debug_vis(ds_train_training, train_label_list_dbg, layernames, conf.seq_len, keras_compat=True)
-    # cleanup_and_exit(cleanup_files)
 ## end DEBUG
 
 ## load and compile model from config path
