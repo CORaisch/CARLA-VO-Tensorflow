@@ -14,7 +14,6 @@ class Config:
         self.seq_len = int(conf['DATASET']['SEQ_LEN'])
         self.subsequence_len = int(conf['DATASET']['SUBSEQUENCE_LEN'])
         self.subsequence_shift = int(conf['DATASET']['SUBSEQUENCE_SHIFT'])
-        self.subsequence_stride = int(conf['DATASET']['SUBSEQUENCE_STRIDE'])
         self.t0 = int(conf['DATASET']['T0'])
         self.t1 = int(conf['DATASET']['T1'])
         # set TRAINING values
@@ -62,7 +61,6 @@ def main():
     my_print(conf.seq_len)
     my_print(conf.subsequence_len)
     my_print(conf.subsequence_shift)
-    my_print(conf.subsequence_stride)
     my_print(conf.t0)
     my_print(conf.t1)
     my_print(conf.batch_size)

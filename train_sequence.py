@@ -108,14 +108,14 @@ def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
             if type(im_id) is np.ndarray:
                 # check if all images from subsequence are from same original sequence
                 clean_assert((im_id == im_id[0]).any() , cleanup_files)
-                print("observation sequence from t = {} to t = {} (dataset: {})".format(im_no[0], im_no[-1], im_id[0][:-1]))
+                print("\nobservation sequence from t = {} to t = {} (dataset: {})".format(im_no[0], im_no[-1], im_id[0][:-1]))
                 orig_label = [ combine(labels[im_id[k]][int(im_no[k])+t0 : int(im_no[k])+t1, :]) for k in range(len(im_id)) ]
             else:
-                print("observation starting at t = {} (dataset: {})".format(im_no, im_id[:-1]))
+                print("\nobservation starting at t = {} (dataset: {})".format(im_no, im_id[:-1]))
                 orig_label = combine(labels[im_id][int(im_no)+t0 : int(im_no)+t1, :])
             orig_label_written = True
     # check if label assignment is correct
-    print("original label: ", orig_label)
+    print("\noriginal label: ", orig_label)
     print("batch label   : ", label)
     clean_assert((orig_label == label).all(), cleanup_files)
     # reshape observation data
@@ -248,7 +248,7 @@ def debug_vis(ds, labels, layernames, seq_len):
         if len(image_data[0][0].shape) == 4:
             # iterate sequence
             subseq_len = image_data[0][0].shape[0]
-            print("\n[INFO] iterate next sequence:")
+            print("\n[INFO] iterate next subsequence:")
             for i in range(subseq_len):
                 print("observation no. {}/{}".format(i+1,subseq_len))
                 # extract one observation from sequence:
@@ -326,8 +326,7 @@ def make_debug_compatible(*records):
     ret = (tuple([parse_image_record(raw_image) for i, raw_image in enumerate(records[0])]), records[1])
     return ret
 
-# TODO implement debug version
-def subsequence_ds(ds, window_size, shift=1, stride=1, debug=False):
+def subsequence_ds(ds, window_size, shift, layernames, debug=False):
     def map_to_parsed_tuple(*sub):
         return (tuple([parse_image_record(raw_image) for raw_image in sub[0]]), sub[1])
 
@@ -354,7 +353,7 @@ def subsequence_ds(ds, window_size, shift=1, stride=1, debug=False):
         ## training case, map: parse images => ((serialized_im_0, ..., serialized_im_n), label) -> ((image_0, ..., image_n), label)
         ds = ds.map(map_to_parsed_image)
     ## slice ds into ds of subsequenced datasets: ((image_0, ..., image_n), label) -> ((image_sequence_ds_in_0, ..., image_sequence_ds_in_n), label_ds_sequence)
-    ds = ds.window(window_size, shift, stride, drop_remainder=True)
+    ds = ds.window(window_size, shift, stride=1, drop_remainder=True)
     if debug:
         ## debug case, map: (((image_sequence_ds_0, meta_sequence_ds_0), ..., (image_sequence_ds_n, meta_sequence_ds_n)), label) -> (((image_sequence_in_0, meta_sequence_0), ..., (image_sequence_in_n, meta_sequence_n)), label_sequence)
         ds = ds.flat_map(map_to_batch_dbg)
@@ -476,7 +475,7 @@ def signal_handler(sig, frame):
     print("\n[INFO] exit on Ctrl+C")
     cleanup_and_exit(cleanup_files)
 
-def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1, _dataset_name, _cleanup_files):
+def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1, _dataset_name, _cleanup_files, _subseq_len=0, _subseq_shift=0, _dbg=False):
     ## extract dataset archive
     num_obs_total  = 0
     final_datasets = []
@@ -597,7 +596,11 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
         del ds
         print(" done")
 
-    # FIXME subsequencing must happen alredy here to prevent falsy windows
+    # subsequence dataset if requested
+    # -> subsequencing must happen before concatenation to prevent corrupted windows
+    if _subseq_len > 1:
+            final_datasets = [ subsequence_ds(fds, _subseq_len, _subseq_shift, layernames, debug=_dbg) for fds in final_datasets ]
+
     # concatenate all tf.data.Datasets from _dataset_files to one long tf.data.Dataset
     print("[INFO] concatenating {} datasets to dataset with {} observations...".format(len(final_datasets), num_obs_total), end='', flush=True)
     ds_final = final_datasets[0]
@@ -628,18 +631,13 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
 # TODO set size of shuffle_buffer s.t. it fits into local mem -> make it independent from num_images (maybe tf.data.experimental can help)
 def setup_dataset_pipeline(ds, conf, shuffle_buf_len, debug=False, subsequencing=False):
     # NOTE 1) shuffle dataset, 2) cache data in memory, 3) map compatability function, 4) batch dataset 5) repeat dataset infinitly, 6) make dataset prefetchable
-    # FIXME subsequencing must already happen in 'tfrec_to_ds', but then this function needs to be adjusted also
-    if debug:
-        if subsequencing:
-            ds = subsequence_ds(ds, conf.subsequence_len, conf.subsequence_shift, conf.subsequence_stride, debug=True).shuffle(shuffle_buf_len).cache()\
+    if debug and not subsequencing: # prepare pipeline for visualization of non-subsequenced dataset
+        ds = ds.shuffle(shuffle_buf_len).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+            .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+    elif subsequencing: # prepare pipeline for training on subsequenced dataset OR for visualization of subsequenced dataset (if debug=True)
+        ds = ds.shuffle(shuffle_buf_len).cache()\
                 .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-        else:
-            ds = ds.shuffle(shuffle_buf_len).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-    elif subsequencing:
-        ds = subsequence_ds(ds, conf.subsequence_len, conf.subsequence_shift, conf.subsequence_stride).shuffle(shuffle_buf_len).cache()\
-                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
-    else:
+    else: # prepare pipeline for training on non-subsequenced dataset
         ds = ds.shuffle(shuffle_buf_len).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
                 .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     return ds
@@ -660,7 +658,8 @@ conf = config.Config(args.config)
 
 # make trainaing dataset from tfrec
 print("[INFO] training dataset will be generated from following files:", conf.training_files)
-ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "training dataset", [])
+ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "training dataset",\
+                                                     [], conf.subsequence_len, conf.subsequence_shift, conf.debug)
 num_train_obs  = train_ds_info[0]; layernames = train_ds_info[1];
 cleanup_files = train_ds_meta[0]; train_label_list_dbg = train_ds_meta[1];
 # NOTE ds_train.shape: ((all input images), (label)) -> ((im_l_0, im_r_0 im_l_1, im_r_1, .., im_l_(seq_len), im_r_(seq_len)), (tx,ty,tz,roll,pitch,yaw))
@@ -687,7 +686,8 @@ if conf.validation_files == []:
 else:
     # case: validation files set
     print("[INFO] validation data is set, validation dataset will be generated from following files:", conf.validation_files)
-    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "validation dataset", cleanup_files)
+    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1,\
+                                                         "validation dataset", cleanup_files, conf.subsequence_len, conf.subsequence_shift, conf.debug)
     num_valid_obs = valid_ds_info[0]; valid_layernames = valid_ds_info[1];
     cleanup_files = valid_ds_meta[0]; valid_label_list_dbg = valid_ds_meta[1];
     # assert: check if layernames are consistent with the ones from ds_train
