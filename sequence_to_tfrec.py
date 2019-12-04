@@ -15,15 +15,15 @@ tf.compat.v1.enable_eager_execution()
 ###################### helpers ######################
 def parse_args():
     # create argparse instance
-    argparser = argparse.ArgumentParser(description="converts a sequence to TFRecord files used for training with Tensorflow")
+    argparser = argparse.ArgumentParser(description="converts an image sequence dataset to TFRecord files tagged with meta informations used for training with Tensorflow ('train_sequence.py')")
     # add positional arguments
     argparser.add_argument('archive_name', type=str, help="name of final archive where all data will be written to")
     argparser.add_argument('labels', type=str, help="path to labels file")
-    argparser.add_argument('inputmap', type=str, nargs='*', metavar="\'PATH/TO/IMAGES=NAME\'", help="maps all input sequences to the desired name in the archive. The archive name will later be used as name for the inputlayer of the DNN")
+    argparser.add_argument('inputmap', type=str, nargs='*', metavar="\'PATH/TO/IMAGES=NAME\'", help="maps all input sequences to the desired name in the archive. This name will later be used as name for the DNNs inputlayer")
     # add optional arguments
     argparser.add_argument('--image_channels', '-imc', type=int, default=1, help="1 = images are stored grayscale, 3 = images are stored RGB")
-    argparser.add_argument('--image_width', '-imw', type=int, default=196, help="width of stored images")
-    argparser.add_argument('--image_height', '-imh', type=int, default=196, help="height of stored images")
+    argparser.add_argument('--image_width', '-imw', type=int, default=256, help="width of stored images")
+    argparser.add_argument('--image_height', '-imh', type=int, default=256, help="height of stored images")
     # parse args
     args = argparser.parse_args()
     # convert inputmap to dict

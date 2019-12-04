@@ -6,16 +6,16 @@ import os
 
 def parse_args():
     # create argparse instance
-    argparser = argparse.ArgumentParser(description="converts a CARLA sequence to TFRecord files used for training with Tensorflow")
+    argparser = argparse.ArgumentParser(description="converts an CARLA image sequence dataset to TFRecord files tagged with meta informations used for training with Tensorflow ('train_sequence.py')")
     # add positional arguments
     argparser.add_argument('base', metavar="/PATH/TO/CARLA/SEQUENCE", help="path to CARLA sequence base directory")
-    argparser.add_argument('sensors', type=str, nargs='*', metavar="{rgb|depth|semantic_segmentation}_{left|right}", help="list of sensors that will converted to tfrec file. The sensor name will later be used as name for the inputlayer of the DNN")
+    argparser.add_argument('sensors', type=str, nargs='*', metavar="{rgb|depth|semantic_segmentation}_{left|right}", help="list of sensors that will be converted to TFRecord file. This name will later be used as name for the DNNs inputlayer")
     # add optional arguments
     argparser.add_argument('--labels', '-l', type=str, default="relative_euler_poses_nulled.txt", help="select label file")
-    argparser.add_argument('--archive_name', '-out', type=str, default=None, help="name of final archive where all data will be written to. Default will be base name of CARLA sequence")
+    argparser.add_argument('--archive_name', '-out', type=str, default=None, help="name of final archive where all data will be written to. Default will be the base name of CARLA sequence")
     argparser.add_argument('--image_channels', '-imc', type=int, default=1, help="1 = images are stored grayscale, 3 = images are stored RGB")
-    argparser.add_argument('--image_width', '-imw', type=int, default=196, help="width of stored images")
-    argparser.add_argument('--image_height', '-imh', type=int, default=196, help="height of stored images")
+    argparser.add_argument('--image_width', '-imw', type=int, default=256, help="width of stored images")
+    argparser.add_argument('--image_height', '-imh', type=int, default=256, help="height of stored images")
     # parse args
     args = argparser.parse_args()
     # set default archive name

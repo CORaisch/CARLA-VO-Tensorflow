@@ -35,7 +35,7 @@ def pose_to_string(euler_pose):
 
 def main():
     # setup argparser
-    argparser = argparse.ArgumentParser(description="Converts absolute KITTI poses to relative Euler poses, ready for training.")
+    argparser = argparse.ArgumentParser(description="Converts absolute KITTI poses to relative Euler poses, ready for mixed training with CARLA sequences using 'train_sequence.py'.")
     argparser.add_argument('--poses', '-p', type=str, help="path to absolute KITTI poses")
     args = argparser.parse_args()
 
