@@ -6,14 +6,15 @@ import os, zipfile, argparse
 import src.config as config
 
 def parse_args():
-    argparser = argparse.ArgumentParser(description="This scripts the RCNN from DeepVO.")
+    argparser = argparse.ArgumentParser(description="This script generates the RCNN from the DeepVO paper.")
     argparser.add_argument('config', help="same config file as used for training with 'train_sequence.py'. Config file is required to set the input layers names as 'train_tfrec.py' expects it. Names will be generated from 'DATASET_FILES' option, so ensure to use this option consistently.")
     argparser.add_argument('--model_out', '-out', default='', help="path to where the model should be saved.")
     return argparser.parse_args()
 
 # NOTE 'arch_file' holds the path to a sequence zip archive
-# NOTE 'seq_len' defines the length of a single observation sequence
-def make_layernames(arch_file, seq_len):
+# NOTE 't_inputs' defines the number of timesteps presented the DNN as input
+#       -> recording N images at a single point in time then setting 't_inputs' to M will result in N*M input images to the DNN
+def make_layernames(arch_file, t_inputs):
     layernames = []
     ## get filenames from archive
     # open archive
@@ -26,7 +27,7 @@ def make_layernames(arch_file, seq_len):
         # cut away the file extension
         name = f.split('.')[0]
         # create enumerate input layernames
-        for t in range(seq_len):
+        for t in range(t_inputs):
             layernames.append(name + '_' + str(t))
     # close archive
     fz.close()
@@ -100,12 +101,12 @@ def main():
     args = parse_args()
     conf = config.Config(args.config)
     # make header for the DNN
-    layernames = make_layernames(conf.training_files[0], conf.seq_len)
+    layernames = make_layernames(conf.training_files[0], conf.input_timesteps)
     # create and compile model
     model = create_model(layernames, conf.image_shape)
     # write model to disk
-    name = 'deepvo__in' + str(len(layernames)) \
-             + '_seqlen' + str(conf.seq_len) \
+    name = 'deepvo__in'  + str(len(layernames)) \
+             + '_tInputs' + str(conf.input_timesteps) \
              + '_imw'    + str(conf.image_shape[0]) \
              + '_imh'    + str(conf.image_shape[1]) \
              + '_imc'    + str(conf.image_shape[2]) \

@@ -20,21 +20,21 @@ def show_image(image, label):
     plt.show()
 
 # show images from list
-def show_images(images, label, sequence_length):
+def show_images(images, label, t_inputs):
     import matplotlib.pyplot as plt
     # get useful information on images
     num_images = len(images)
-    fig_cols   = int(num_images/sequence_length) # NOTE 'num_images' is always a multiple of 'sequence_length' => no ceil needed here
-    fig        = plt.figure(figsize=(sequence_length, fig_cols))
+    fig_cols   = int(num_images/t_inputs) # NOTE 'num_images' is always a multiple of 't_inputs' => no ceil needed here
+    fig        = plt.figure(figsize=(t_inputs, fig_cols))
     # display images with pyplot.figure
-    for row in range(sequence_length):
+    for row in range(t_inputs):
         for col in range(fig_cols):
             # check if image still exists for current cell
             idx = row * fig_cols + col
             if idx >= num_images:
                 break
             # NOTE idx always points to valid data
-            fig.add_subplot(sequence_length, fig_cols, idx+1)
+            fig.add_subplot(t_inputs, fig_cols, idx+1)
             if images[0][0].shape[2] == 1: # case: GRAYSCALE images
                 plt.imshow(images[idx][0][:,:,0], cmap='gray')
                 plt.title(images[idx][1])
@@ -75,7 +75,7 @@ def show_tabbed_plots(pc):
     app.exec_()
     plt.close('all')
 
-def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
+def prepare_observations(obs, labels, layernames, t_inputs, t0, t1):
     images_batch = obs[0]
     labels_batch = obs[1]
     # roll random batch entry
@@ -119,7 +119,7 @@ def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
     print("batch label   : ", label)
     clean_assert((orig_label == label).all(), cleanup_files)
     # reshape observation data
-    im_tmp = [ [] for x in range(seq_len) ]
+    im_tmp = [ [] for x in range(t_inputs) ]
     for im_data in images:
         name = im_data[0]
         t    = int(name.split('_')[-1])
@@ -133,7 +133,7 @@ def prepare_observations(obs, labels, layernames, seq_len, t0, t1):
     print("##########")
     return image_data, label
 
-def prepare_observations_keras(obs, labels, layernames, seq_len):
+def prepare_observations_keras(obs, labels, layernames, t_inputs):
     input_data = obs[0]
     labels_batch = obs[1]
     # roll random batch entry
@@ -148,7 +148,7 @@ def prepare_observations_keras(obs, labels, layernames, seq_len):
         layer = layername
         images.append( (layer, image) )
     # reformat data
-    im_tmp = [ [] for x in range(seq_len) ]
+    im_tmp = [ [] for x in range(t_inputs) ]
     for im_data in images:
         name = im_data[0]
         t    = int(name.split('_')[-1])
@@ -162,13 +162,13 @@ def prepare_observations_keras(obs, labels, layernames, seq_len):
     image_data = [ e for sub in im_tmp for e in sub ]
     return image_data, label
 
-def make_observations_figure(image_data, label, seq_len):
+def make_observations_figure(image_data, label, t_inputs):
     import matplotlib.pyplot as plt
     # make observation figure
     num_images = len(image_data)
-    figcols = int(num_images/seq_len)
-    fig_obs, im_axes = plt.subplots(nrows=seq_len, ncols=figcols, squeeze=False)
-    for row in range(seq_len):
+    figcols = int(num_images/t_inputs)
+    fig_obs, im_axes = plt.subplots(nrows=t_inputs, ncols=figcols, squeeze=False)
+    for row in range(t_inputs):
         for col in range(figcols):
             idx = row * figcols + col
             if idx >= num_images:
@@ -214,9 +214,9 @@ def make_evo_traj_figures(traj_file_path):
     # return figures
     return fig_traj, fig_xyz, fig_rpy
 
-def show_debug_figure(image_data, label, seq_len):
+def show_debug_figure(image_data, label, t_inputs):
     from evo.tools import plot
-    fig_obs = make_observations_figure(image_data, label, seq_len)
+    fig_obs = make_observations_figure(image_data, label, t_inputs)
     # create temporary pose file which holds 1) identity and 2) relative pose from label
     tmp_file_name = '.tmp_label.txt'
     with open(tmp_file_name, 'w') as f:
@@ -234,16 +234,16 @@ def show_debug_figure(image_data, label, seq_len):
     show_tabbed_plots(plot_collection)
 
 # NOTE set keras_compat=True if tf.dataset is mapped to 'make_keras_compatible', else use keras_compat=False
-def debug_vis(ds, labels, layernames, seq_len):
+def debug_vis(ds, labels, layernames, t_inputs):
     for obs in ds:
         ## TODO here concatenation could be tested! -> take both inputlayers batches and concat at image-channel dimension, then visualize
         # check which dataset version is loaded (final or debug)
         keras_compat = type(obs[0]) is dict
         # make figures for trajectory and observations
         if keras_compat:
-            image_data, label = prepare_observations_keras(obs, labels, layernames, seq_len)
+            image_data, label = prepare_observations_keras(obs, labels, layernames, t_inputs)
         else:
-            image_data, label = prepare_observations(obs, labels, layernames, seq_len, conf.t0, conf.t1)
+            image_data, label = prepare_observations(obs, labels, layernames, t_inputs, conf.t0, conf.t1)
         # check if image_data contains sequences or single images
         if len(image_data[0][0].shape) == 4:
             # iterate sequence
@@ -256,10 +256,10 @@ def debug_vis(ds, labels, layernames, seq_len):
                 images_from_seq = [ (im_seq[i,:,:,:], name_seq[i]) for (im_seq, name_seq) in image_data ]
                 # extract one label from sequence: (t,6) -> (6,)
                 label_from_seq = label[i,:]
-                show_debug_figure(images_from_seq, label_from_seq, seq_len)
+                show_debug_figure(images_from_seq, label_from_seq, t_inputs)
         else:
             # show singel observation
-            show_debug_figure(image_data, label, seq_len)
+            show_debug_figure(image_data, label, t_inputs)
 
 
 ###################### helpers ######################
@@ -370,7 +370,7 @@ def subsequence_ds(ds, window_size, shift, layernames, debug=False):
 def combine(labels):
     # iterate 1st dim of labels (shape: (n,6)) and add 6 dof values
     if labels.shape[0] == 1:
-        # NOTE case: no need to combine labels -> sequence length is 2 and labels are already in consecutive order
+        # NOTE case: no need to combine labels -> INPUT_TIMESTEPS is 2 and labels are already in consecutive order
         return labels[0,:]
     else:
         # NOTE case: combine transformations -> assuming transformations are ordered consecutively in time
@@ -475,7 +475,7 @@ def signal_handler(sig, frame):
     print("\n[INFO] exit on Ctrl+C")
     cleanup_and_exit(cleanup_files)
 
-def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1, _dataset_name, _cleanup_files, _subseq_len=0, _subseq_shift=0, _dbg=False):
+def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1, _dataset_name, _cleanup_files, _subseq_len=0, _subseq_shift=0, _dbg=False):
     ## extract dataset archive
     num_obs_total  = 0
     final_datasets = []
@@ -542,7 +542,7 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
             clean_assert(im_channels == header_record['channels'].numpy(), _cleanup_files)
         # compute information necessarry for further computation
         num_images       = header_record['num_images'].numpy()
-        num_observations = num_images - (_seq_len - 1)
+        num_observations = num_images - (_t_inputs - 1)
         num_obs_total   += num_observations
         del ds_header
         del header_record
@@ -555,8 +555,8 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
         labels = np.load(label_files[i_arch][0])['labels']
         clean_assert(num_images-1 == labels.shape[0], _cleanup_files) # NOTE number of training images must match the number of labels + 1 (since each pair of images needs one label)
         # prepare labels s.t. user can specify between which 2 timepoints within the sequence the rel. pose should be used as label
-        # example: SEQ_LEN=4 -> [_t0,_t1,t2,t3], label_from=[1,2] => use rel. pose from _t1 to t2
-        clean_assert(_seq_len>=2 and _t0<_t1 and _t0>=0 and _t1>0 and _t0<(_seq_len-1) and _t1<_seq_len, _cleanup_files) # NOTE check if _t0,_t1,_seq_len are valid
+        # example: INPUTS_TIMESTEPS=4 -> [_t0,_t1,t2,t3], label_from=[1,2] => use rel. pose from _t1 to _t2
+        clean_assert(_t_inputs>=2 and _t0<_t1 and _t0>=0 and _t1>0 and _t0<(_t_inputs-1) and _t1<_t_inputs, _cleanup_files) # NOTE check if _t0,_t1,_t_inputs are valid
         observation_labels = [ combine(labels[i+_t0 : i+_t1, :]) for i in range(num_observations) ]
         observation_labels = np.array(observation_labels)
         # create tf.data.Dataset object for labels
@@ -573,8 +573,8 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
             # skip the header
             dataset = ds.skip(1)
             # create observation sequence
-            for t in range(_seq_len):
-                sub_ds = dataset.skip(t).take(num_observations) # NOTE length of final dataset is: num_images - (_seq_len-1)
+            for t in range(_t_inputs):
+                sub_ds = dataset.skip(t).take(num_observations) # NOTE length of final dataset is: num_images - (_t_inputs-1)
                 # sub_ds = sub_ds.map(parse_image_record)
                 # sub_ds = sub_ds.map(parse_image_record, num_parallel_calls=tf.data.experimental.AUTOTUNE)
                 ds_list.append(sub_ds)
@@ -599,7 +599,7 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
     # subsequence dataset if requested
     # -> subsequencing must happen before concatenation to prevent corrupted windows
     if _subseq_len > 1:
-            final_datasets = [ subsequence_ds(fds, _subseq_len, _subseq_shift, layernames, debug=_dbg) for fds in final_datasets ]
+            final_datasets = [ subsequence_ds(fds, _subseq_len, _subseq_shift, layernames, debug=False) for fds in final_datasets ]
 
     # concatenate all tf.data.Datasets from _dataset_files to one long tf.data.Dataset
     print("[INFO] concatenating {} datasets to dataset with {} observations...".format(len(final_datasets), num_obs_total), end='', flush=True)
@@ -611,7 +611,7 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _seq_len, _t0, _t1,
     # print info about dataset
     print("[INFO] information about {}: ".format(_dataset_name))
     print("\timage shape           : {}".format(image_shape))
-    print("\tsequence length       : {}".format(_seq_len))
+    print("\tsequence length       : {}".format(_t_inputs))
     print("\tinfere pose from (t0) : {}".format(_t0))
     print("\tinfere pose till (t1) : {}".format(_t1))
     print("\tnumber observations   : {}".format(num_obs_total))
@@ -658,12 +658,13 @@ conf = config.Config(args.config)
 
 # make trainaing dataset from tfrec
 print("[INFO] training dataset will be generated from following files:", conf.training_files)
-ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1, "training dataset",\
-                                                     [], conf.subsequence_len, conf.subsequence_shift, conf.debug)
+ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.input_timesteps,\
+                                                     conf.t0, conf.t1, "training dataset", [],\
+                                                     conf.subsequence_len, conf.subsequence_shift, conf.debug)
 num_train_obs  = train_ds_info[0]; layernames = train_ds_info[1];
 cleanup_files = train_ds_meta[0]; train_label_list_dbg = train_ds_meta[1];
-# NOTE ds_train.shape: ((all input images), (label)) -> ((im_l_0, im_r_0 im_l_1, im_r_1, .., im_l_(seq_len), im_r_(seq_len)), (tx,ty,tz,roll,pitch,yaw))
-# NOTE ds_train.shape mono case (most often used): ((im_l_0, im_l_1), (tx,ty,tz,roll,pitch,yaw))
+# NOTE ds_train.shape: ((all input images),(label)) -> ((im_l_0,im_r_0,im_l_1,im_r_1,...,im_l_(input_timesteps),im_r_(input_timesteps)),(tx,ty,tz,roll,pitch,yaw))
+# NOTE ds_train.shape mono case (most often used): ((im_l_0, im_l_1),(tx,ty,tz,roll,pitch,yaw)) [with mono sequences and INPUT_TIMESTEPS=2]
 
 # load validation dataset if requested
 use_validation_data = True
@@ -686,7 +687,7 @@ if conf.validation_files == []:
 else:
     # case: validation files set
     print("[INFO] validation data is set, validation dataset will be generated from following files:", conf.validation_files)
-    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.seq_len, conf.t0, conf.t1,\
+    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.input_timesteps, conf.t0, conf.t1,\
                                                          "validation dataset", cleanup_files, conf.subsequence_len, conf.subsequence_shift, conf.debug)
     num_valid_obs = valid_ds_info[0]; valid_layernames = valid_ds_info[1];
     cleanup_files = valid_ds_meta[0]; valid_label_list_dbg = valid_ds_meta[1];
@@ -713,7 +714,7 @@ print("[INFO] final tf.data.Dataset format: {}".format(ds_train))
 if conf.debug:
     ## visualize data from final dataset
     print("[INFO] visualizing random observations from batched final dataset...")
-    debug_vis(ds_train, train_label_list_dbg, layernames, conf.seq_len)
+    debug_vis(ds_train, train_label_list_dbg, layernames, conf.input_timesteps)
     cleanup_and_exit(cleanup_files)
 ## end DEBUG
 
