@@ -477,8 +477,8 @@ def signal_handler(sig, frame):
 
 def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1, _dataset_name, _cleanup_files, _subseq_len=0, _subseq_shift=0, _dbg=False):
     ## extract dataset archive
-    num_obs_total  = 0
     final_datasets = []
+    num_obs        = []
     layernames     = [] # TODO when functions will be wrapped into dataset class, this variable should become class member
     image_files    = [ [] for i in range(len(_dataset_files)) ] # TODO when functions will be wrapped into dataset class, this variable should become class member
     label_files    = [ [] for i in range(len(_dataset_files)) ] # TODO when functions will be wrapped into dataset class, this variable should become class member
@@ -536,14 +536,14 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
             im_channels = header_record['channels'].numpy()
             image_shape = (im_height, im_width, im_channels)
             clean_assert(image_shape == tuple(_im_shape_conf), _cleanup_files) # NOTE images in header needs to fit the shape given in config
-        else: # for any further archive check if headers are compatible
+        else: # for any further archive we only need to check if headers are compatible
             clean_assert(im_height == header_record['height'].numpy(), _cleanup_files)
             clean_assert(im_width == header_record['width'].numpy(), _cleanup_files)
             clean_assert(im_channels == header_record['channels'].numpy(), _cleanup_files)
         # compute information necessarry for further computation
         num_images       = header_record['num_images'].numpy()
         num_observations = num_images - (_t_inputs - 1)
-        num_obs_total   += num_observations
+        num_obs.append(num_observations)
         del ds_header
         del header_record
         print(" done")
@@ -553,10 +553,16 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
         # NOTE labels are stored as numpy array with shape (OBSERVATION_LENGTH, 6)
         # NOTE accessing: labels[T] returns the 6 dof relative pose from time T to T+1
         labels = np.load(label_files[i_arch][0])['labels']
-        clean_assert(num_images-1 == labels.shape[0], _cleanup_files) # NOTE number of training images must match the number of labels + 1 (since each pair of images needs one label)
-        # prepare labels s.t. user can specify between which 2 timepoints within the sequence the rel. pose should be used as label
-        # example: INPUTS_TIMESTEPS=4 -> [_t0,_t1,t2,t3], label_from=[1,2] => use rel. pose from _t1 to _t2
-        clean_assert(_t_inputs>=2 and _t0<_t1 and _t0>=0 and _t1>0 and _t0<(_t_inputs-1) and _t1<_t_inputs, _cleanup_files) # NOTE check if _t0,_t1,_t_inputs are valid
+        # cast labels to float32 s.t. labels and input data are of same type
+        labels = labels.astype(np.float32)
+
+        # NOTE number of training images must match the number of labels + 1 since each pair of images is associated to one label
+        clean_assert(num_images-1 == labels.shape[0], _cleanup_files)
+
+        # prepare labels s.t. user can specify between which 2 timepoints within the input-sequence the rel. pose should be used as label
+        # example: INPUTS_TIMESTEPS=4 -> [t0,t1,t2,t3], label_from=[1,2] => use rel. pose from t1 to t2
+        # NOTE check if _t0, _t1, _t_inputs are properly set
+        clean_assert(_t_inputs>=2 and _t0<_t1 and _t0>=0 and _t1>0 and _t0<(_t_inputs-1) and _t1<_t_inputs, _cleanup_files)
         observation_labels = [ combine(labels[i+_t0 : i+_t1, :]) for i in range(num_observations) ]
         observation_labels = np.array(observation_labels)
         # create tf.data.Dataset object for labels
@@ -596,10 +602,36 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
         del ds
         print(" done")
 
+    # ## beg DEBUG
+    # print("count befor subsequencing:")
+    # for i, d in enumerate(final_datasets):
+    #     tmp_count = 0
+    #     for obs in d:
+    #         tmp_count += 1
+    #     print("num_train_obs_counted:",tmp_count)
+    #     print("num_train_obs:",num_obs[i])
+    # ## end DEBUG
+
     # subsequence dataset if requested
     # -> subsequencing must happen before concatenation to prevent corrupted windows
     if _subseq_len > 1:
-            final_datasets = [ subsequence_ds(fds, _subseq_len, _subseq_shift, layernames, debug=False) for fds in final_datasets ]
+            final_datasets = [ subsequence_ds(fds, _subseq_len, _subseq_shift, layernames, debug=_dbg) for fds in final_datasets ]
+            # adapt observation size
+            # FIXME check if formula is correct: floor( (l + (w-s)*(l-w)) / w )
+            num_obs = [ int((l + (_subseq_len-_subseq_shift)*(l-_subseq_len))/_subseq_len) for l in num_obs ]
+
+    # ## beg DEBUG
+    # print("count after subsequencing:")
+    # for i, d in enumerate(final_datasets):
+    #     tmp_count = 0
+    #     for obs in d:
+    #         tmp_count += 1
+    #     print("num_train_obs_counted:",tmp_count)
+    #     print("num_train_obs:",num_obs[i])
+    # ## end DEBUG
+
+    # compute num of total observations
+    num_obs_total = sum(num_obs)
 
     # concatenate all tf.data.Datasets from _dataset_files to one long tf.data.Dataset
     print("[INFO] concatenating {} datasets to dataset with {} observations...".format(len(final_datasets), num_obs_total), end='', flush=True)
@@ -726,7 +758,7 @@ clean_assert(check_model_layout(model, layernames), cleanup_files)
 
 ## print model informations
 print("[INFO] information about the DNN model thats going to be trained:")
-model.summary()
+model.summary(line_length=150)
 
 ## setup tf.keras callbacks for training loop NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/TensorBoard#class_tensorboard
 print("[INFO] training the model, logs will be written to '{}' and checkpoints to '{}':".format(conf.log_dir, conf.checkpoint_dir))
