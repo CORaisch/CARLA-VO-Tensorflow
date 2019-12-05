@@ -602,16 +602,6 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
         del ds
         print(" done")
 
-    # ## beg DEBUG
-    # print("count befor subsequencing:")
-    # for i, d in enumerate(final_datasets):
-    #     tmp_count = 0
-    #     for obs in d:
-    #         tmp_count += 1
-    #     print("num_train_obs_counted:",tmp_count)
-    #     print("num_train_obs:",num_obs[i])
-    # ## end DEBUG
-
     # subsequence dataset if requested
     # -> subsequencing must happen before concatenation to prevent corrupted windows
     if _subseq_len > 1:
@@ -619,16 +609,6 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
             # adapt observation size
             # FIXME check if formula is correct: floor( (l + (w-s)*(l-w)) / w )
             num_obs = [ int((l + (_subseq_len-_subseq_shift)*(l-_subseq_len))/_subseq_len) for l in num_obs ]
-
-    # ## beg DEBUG
-    # print("count after subsequencing:")
-    # for i, d in enumerate(final_datasets):
-    #     tmp_count = 0
-    #     for obs in d:
-    #         tmp_count += 1
-    #     print("num_train_obs_counted:",tmp_count)
-    #     print("num_train_obs:",num_obs[i])
-    # ## end DEBUG
 
     # compute num of total observations
     num_obs_total = sum(num_obs)
