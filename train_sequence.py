@@ -732,7 +732,8 @@ if conf.debug:
 
 ## load and compile model from config path
 model = tf.keras.models.load_model(conf.model_file, compile=False)
-model.compile(optimizer='adam', loss=custom_losses.mse)
+model.compile(optimizer='adam', loss=custom_losses.weighted_mse(k=100))
+# model.compile(optimizer='adam', loss=tf.losses.MSE)
 clean_assert(check_model_layout(model, layernames), cleanup_files)
 # NOTE layernames == valid_layernames! this was already ensured by assert earlier => validation dataset will be compatible with loaded model
 
@@ -759,7 +760,9 @@ if not use_validation_data:
         ds_train,
         steps_per_epoch=train_dataset_length/conf.batch_size,
         epochs=conf.epoches,
-        callbacks=[csv_logger, tb_logger, checkpoint_callback])
+        callbacks=[csv_logger, tb_logger, checkpoint_callback],
+        shuffle=False, # NOTE td.data.Dataset will take care about shuffling
+        )
 else:
     history = model.fit(
         ds_train,
@@ -767,7 +770,9 @@ else:
         validation_steps=valid_dataset_length/conf.batch_size,
         steps_per_epoch=train_dataset_length/conf.batch_size,
         epochs=conf.epoches,
-        callbacks=[csv_logger, tb_logger, checkpoint_callback])
+        callbacks=[csv_logger, tb_logger, checkpoint_callback],
+        shuffle=False, # NOTE td.data.Dataset will take care about shuffling
+        )
 
 # save final model
 print("[INFO] training done, final model is saved at '{}'".format(conf.model_out))
@@ -782,4 +787,3 @@ if use_validation_data:
 ## clean up
 # remove all extracted files from disk
 cleanup_and_exit(cleanup_files)
-
