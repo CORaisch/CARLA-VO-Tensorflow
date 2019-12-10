@@ -640,7 +640,6 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
     return ds_final, info, clean_dbg_stuff
 
 # TODO play around with tf.contrib.data functions to make pipeline more effective -> read https://www.tensorflow.org/tutorials/load_data/images#performance
-# TODO set size of shuffle_buffer s.t. it fits into local mem -> make it independent from num_images (maybe tf.data.experimental can help)
 def setup_dataset_pipeline(ds, conf, shuffle_buf_len, debug=False, subsequencing=False):
     # NOTE 1) shuffle dataset, 2) cache data in memory, 3) map compatability function, 4) batch dataset 5) repeat dataset infinitly, 6) make dataset prefetchable
     if debug and not subsequencing: # prepare pipeline for visualization of non-subsequenced dataset
@@ -731,9 +730,12 @@ if conf.debug:
 ## end DEBUG
 
 ## load and compile model from config path
+print("[INFO] load and compile model...", end='', flush=True)
+## TODO provide models via subclassing in src/models.py and load them from there
+##      see subclassing example at: https://www.tensorflow.org/api_docs/python/tf/keras/Model
 model = tf.keras.models.load_model(conf.model_file, compile=False)
 model.compile(optimizer='adam', loss=custom_losses.weighted_mse(k=100))
-# model.compile(optimizer='adam', loss=tf.losses.MSE)
+print(" done")
 clean_assert(check_model_layout(model, layernames), cleanup_files)
 # NOTE layernames == valid_layernames! this was already ensured by assert earlier => validation dataset will be compatible with loaded model
 
