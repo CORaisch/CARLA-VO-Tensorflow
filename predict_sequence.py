@@ -28,15 +28,10 @@ def write_pred_to_file(f, pred):
     fstr = str(pred[0]) + ' ' + str(pred[1]) + ' ' + str(pred[2]) + ' ' + str(pred[3]) + ' ' + str(pred[4]) + ' ' + str(pred[5]) + '\n'
     f.write(fstr)
 
-# TODO visualize input images in grid
-# left_i   | right_i
-# left_i+1 | right_i+1
-# ...
+# TODO visualize input images
 def visualize_inputs(images):
     print("[TODO] visualize input images")
     print(images.keys())
-    # TODO rearrange images
-    # TODO visualize in grid
 
 def parse_args():
     # create argparse instance
@@ -47,8 +42,9 @@ def parse_args():
     argparser.add_argument('config', type=str, help="Config file needs to be passed in order to specify the training setup. See 'configs/sample.conf' for an template.")
     # add optional arguments
     argparser.add_argument('--out', '-o', type=str, default=None, help="file where the predictions are stored in (as .txt file). By default it will be saved in the predicitons subdir with the same name as the model file with added \'_pred\' suffix.")
-    argparser.add_argument('--verbose', '-v', type=bool, default=False, help="set to show more information.")
+    argparser.add_argument('--verbose', '-v', action='store_true', help="set to show more information.")
     argparser.add_argument('--kitti', '-kitti', action='store_true', help="set to True if predicting on KITTI sequence")
+    argparser.add_argument('--RNN', '-RNN', action='store_true', help="set to True if predicting on RNNs")
     # parse args
     args = argparser.parse_args()
     # preprocess --out argument
@@ -82,10 +78,14 @@ nimages = len([name for name in os.listdir(seqpath) if os.path.isfile(os.path.jo
 
 ## load input-images
 with open(args.out, 'w') as predf:
-    for time in range(0, nimages-(conf.seq_len-1)):
+    for time in range(0, nimages-(conf.input_timesteps-1)):
+        # if model is RNN then reset states after each subsequence length
+        # FIXME is this correct ?
+        if args.RNN and time % conf.subsequence_len == 0:
+            model.reset_states()
         # load input images for current timestep
         inputs = {}
-        for t in range(0, conf.seq_len): # for each timestep
+        for t in range(0, conf.input_timesteps): # for each timestep
             for i in range(0,len(args.sequence)): # load the appropriate ammount of images (mono, stereo, etc.)
                 # load image
                 seq = list(args.sequence.keys())[i]
@@ -95,7 +95,14 @@ with open(args.out, 'w') as predf:
                 else:
                     pstr = '%010d'
                 lpath = os.path.join(seq, pstr % (time+t) + '.png')
-                inputs[lname] = tf.stack([load_and_preprocess_image(lpath, conf.image_shape)])
+                im = load_and_preprocess_image(lpath, conf.image_shape)
+                # distinguish if using RNN model or not
+                if args.RNN:
+                    # add BATCH=1 and SUBSEQ=1 dimensions
+                    inputs[lname] = tf.expand_dims(tf.expand_dims(im, 0), 0)
+                else:
+                    # add BATCH=1 dimension
+                    inputs[lname] = tf.expand_dims(im, 0)
 
         # TODO visualize images
         # visualize_inputs(inputs)
@@ -113,8 +120,3 @@ with open(args.out, 'w') as predf:
 
         ## write prediction to file
         write_pred_to_file(predf, pred[0])
-
-#### LATER TODOs:
-# 1) loop above code over complete sequence
-# 2) convert predictions from euler to 3x4 matrices
-# 3) write predictions to file

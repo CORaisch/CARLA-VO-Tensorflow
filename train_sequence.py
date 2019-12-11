@@ -604,10 +604,15 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
 
     # subsequence dataset if requested
     # -> subsequencing must happen before concatenation to prevent corrupted windows
-    if _subseq_len > 1:
+    if _subseq_len > 0:
             final_datasets = [ subsequence_ds(fds, _subseq_len, _subseq_shift, layernames, debug=_dbg) for fds in final_datasets ]
             # adapt observation size
+            if _subseq_shift > _subseq_len:
+                print("[ERROR] TODO implement/extend formula for new subsequenced DS length if subseq_shift > subseq_len!")
+                cleanup_and_exit(_cleanup_files)
+            # NOTE formula so far only holds if subseq_shift <= subseq_len !
             # FIXME check if formula is correct: floor( (l + (w-s)*(l-w)) / w )
+            # TODO implement formula for case: subseq_shift > subseq_len
             num_obs = [ int((l + (_subseq_len-_subseq_shift)*(l-_subseq_len))/_subseq_len) for l in num_obs ]
 
     # compute num of total observations
@@ -711,7 +716,7 @@ else:
 # NOTE pipeline info: 1) observations are split into training and validation sets 1.5) validation set will be cached in local mem since it is small enough 2) sets are mapped to preprocess function in parallel 3) sets are batched and repeated 4) sets will be prefetched
 print("[INFO] setting up dataset pipeline (i.e. shuffling, batching, etc)...", end='', flush=True)
 # shuffle observations
-use_subsequencing = conf.subsequence_len > 1
+use_subsequencing = conf.subsequence_len > 0
 if not use_validation_data:
     # train on all observations
     ds_train = setup_dataset_pipeline(ds_train, conf, min(train_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)

@@ -1,5 +1,4 @@
 ## Script creates the DNN from DeepVO that takes Images as Input, stacks them along the Channel Dim and applies Convolutions and LSTMs. It has 6 output Neurons.
-## TODO LSTMs not yet added since I at first need to figure out how to train them.
 
 import tensorflow as tf
 import os, zipfile, argparse
@@ -54,14 +53,13 @@ def create_model(layernames, shape):
 
     ## build input layers
     # collect all input images in list
-    input_layers   = []
+    input_layers   = {}
     for layername in layernames:
         # input layers expect subsequenced data: (BATCH, SUBSEQ, imH, imW, imC) [BATCH=None will be added by keras automatically]
-        input_layer = tf.keras.layers.Input(shape=(None, shape[0], shape[1], shape[2]), name=layername)
-        input_layers.append(input_layer)
+        input_layers[layername] = tf.keras.layers.Input(shape=(None, shape[0], shape[1], shape[2]), name=layername)
     # stack input layers s.t. all input images are stacked together at their channel-dimension
     # TODO verify that stacking batches (of sequences) of images results in the same tensor as stacking the two input images beforehand
-    input_stacked = tf.keras.layers.concatenate(inputs=input_layers, axis=-1, name='stack_inputs')
+    input_stacked = tf.keras.layers.concatenate(inputs=input_layers.values(), axis=-1, name='stack_inputs')
 
     ## add FlowNet convolution layers: https://lmb.informatik.uni-freiburg.de/Publications/2015/DFIB15/flownet.pdf
     # Conv1: kernel=7x7, padding=zeropadding(3,3), stride=(2,2), channels=64, activation=ReLu
@@ -88,9 +86,9 @@ def create_model(layernames, shape):
     # conv_6: (BATCH, SUBSEQ, shape[0]/64, shape[1]/64, 1024) -> (BATCH, SUBSEQ, shape[0]/64 * shape[1]/64 * 1024)
     flatten = TimeDistributed(Flatten(data_format='channels_last'), name='flatten_features')(conv6)
     # add first LSTM layer with 1000 units
-    lstm1 = LSTM(1000, return_sequences=True, name='LSTM1')(flatten)
+    lstm1 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM1')(flatten)
     # add second LSTM layer with 1000 units
-    lstm2 = LSTM(1000, return_sequences=True, name='LSTM2')(lstm1)
+    lstm2 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM2')(lstm1)
 
     ## add final dense layer that maps LSTM outputs to 6 output neurons
     out = TimeDistributed(Dense(6, activation=linear), name='output')(lstm2)
@@ -109,7 +107,7 @@ def main():
     # create and compile model
     model = create_model(layernames, conf.image_shape)
     # write model to disk
-    name = 'deepvo__training__'\
+    name = 'deepvo__train__'\
              + 'in'       + str(len(layernames)) \
              + '_tInputs' + str(conf.input_timesteps) \
              + '_imw'     + str(conf.image_shape[0]) \
