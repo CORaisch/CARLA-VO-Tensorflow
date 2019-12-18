@@ -86,9 +86,12 @@ def create_model(layernames, shape):
     # conv_6: (BATCH, SUBSEQ, shape[0]/64, shape[1]/64, 1024) -> (BATCH, SUBSEQ, shape[0]/64 * shape[1]/64 * 1024)
     flatten = TimeDistributed(Flatten(data_format='channels_last'), name='flatten_features')(conv6)
     # add first LSTM layer with 1000 units
-    lstm1 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM1')(flatten)
+    # TODO figure out: should LSTM1 return its state  to initialize LSTM2?
+    lstm1, state_h, state_c = LSTM(1000, time_major=False, return_state=True, stateful=False, return_sequences=True, name='LSTM1')(flatten)
+    # lstm1 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM1')(flatten)
     # add second LSTM layer with 1000 units
-    lstm2 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM2')(lstm1)
+    lstm2 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM2')(lstm1, initial_state=[state_h, state_c])
+    # lstm2 = LSTM(1000, time_major=False, stateful=False, return_sequences=True, name='LSTM2')(lstm1)
 
     ## add final dense layer that maps LSTM outputs to 6 output neurons
     out = TimeDistributed(Dense(6, activation=linear), name='output')(lstm2)
