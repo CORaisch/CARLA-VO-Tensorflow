@@ -553,8 +553,6 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
         # NOTE labels are stored as numpy array with shape (OBSERVATION_LENGTH, 6)
         # NOTE accessing: labels[T] returns the 6 dof relative pose from time T to T+1
         labels = np.load(label_files[i_arch][0])['labels']
-        # cast labels to float32 s.t. labels and input data are of same type
-        labels = labels.astype(np.float32)
 
         # NOTE number of training images must match the number of labels + 1 since each pair of images is associated to one label
         clean_assert(num_images-1 == labels.shape[0], _cleanup_files)

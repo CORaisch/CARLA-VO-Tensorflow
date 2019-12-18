@@ -48,9 +48,8 @@ def _int64_feature(value):
 def preprocess_image(image, shape):
     # decod raw image
     image = tf.image.decode_image(image, channels=shape[2])
-    # TODO filter images here
     # resize images
-    image = tf.image.resize(image, [shape[0], shape[1]])
+    image = tf.dtypes.cast(tf.image.resize_with_crop_or_pad(image, shape[0], shape[1]), tf.float32)
     # normalize final image to range [0,1]
     image /= 255.0
     # return final image
@@ -127,7 +126,7 @@ def make_header_record(shape, num_images):
 
 
 ###################### test code ######################
-# force tensorflow to throw its inital messages on the very beginning of that script
+# force tensorflow to throw its inital messages at the very beginning of execution
 tf.config.experimental_list_devices()
 
 # parse arguemts
@@ -142,12 +141,12 @@ print("archive name: ", args.archive_name)
 for name, paths in image_paths.items():
     filename = name + '.tfrec'
     print("[INFO] writing images to TFRecord at \'{0}\' compressing with 'zlib'...".format(filename), end='', flush=True)
-    write_images_to_tfrec(paths, filename, (args.image_width, args.image_height, args.image_channels), args.archive_name, compression_type='ZLIB')
+    write_images_to_tfrec(paths, filename, (args.image_height, args.image_width, args.image_channels), args.archive_name, compression_type='ZLIB')
     print(" done")
 # 2) write labels to .npy file
 labels_file = 'labels.npz'
 print("[INFO] writing labels at \'{0}\'...".format(labels_file), end='', flush=True)
-write_labels_to_npz(labels_file, labels)
+write_labels_to_npz(labels_file, np.array(labels, dtype=np.float32))
 print(" done")
 
 # write combined files into zip archive
