@@ -308,7 +308,9 @@ def get_header_description():
 # NOTE 'image_shape' needs to be provided global
 def parse_image_record(raw_record):
     record = tf.io.parse_single_example(raw_record, get_image_description())
-    image  = tf.io.decode_raw(record['image'], tf.float32); image = tf.reshape(image, conf.image_shape);
+    image  = tf.io.decode_raw(record['image'], tf.float32); image = tf.reshape(image, conf.original_shape);
+    image  = tf.image.resize(image, (conf.training_shape[0], conf.training_shape[1]))
+    # TODO preprocess image here -> laplace filtering
     return (record['id'], image)
 
 # this functions takes the n-tuple of input-image records, extract the images and returns a dictionary mapping
@@ -475,7 +477,8 @@ def signal_handler(sig, frame):
     print("\n[INFO] exit on Ctrl+C")
     cleanup_and_exit(cleanup_files)
 
-def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1, _dataset_name, _cleanup_files, _subseq_len=0, _subseq_shift=0, _dbg=False):
+# TODO change function signature: tfrec_to_ds(_dataset_name, _unpack_dir, _config)
+def tfrec_to_ds(_dataset_files, _unpack_dir, _train_shape_conf, _orig_shape_conf, _t_inputs, _t0, _t1, _dataset_name, _cleanup_files, _subseq_len=0, _subseq_shift=0, _dbg=False):
     ## extract dataset archive
     final_datasets = []
     num_obs        = []
@@ -528,6 +531,10 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
         # NOTE all image TFRecord files have an header record as very first entry
         ds_header     = list(input_image_dict.values())[0]
         header_record = tf.io.parse_single_example(next(iter(ds_header)), get_header_description())
+        # compute information necessarry for further computation
+        num_images       = header_record['num_images'].numpy()
+        num_observations = num_images - (_t_inputs - 1)
+        num_obs.append(num_observations)
         # NOTE height, width and channels must be equal amongst all headers
         if i_arch == 0: # initially load headers without checking
             # retrive necessarry information from header
@@ -535,15 +542,11 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
             im_width    = header_record['width'].numpy()
             im_channels = header_record['channels'].numpy()
             image_shape = (im_height, im_width, im_channels)
-            clean_assert(image_shape == tuple(_im_shape_conf), _cleanup_files) # NOTE images in header needs to fit the shape given in config
+            clean_assert(image_shape == tuple(_orig_shape_conf), _cleanup_files)
         else: # for any further archive we only need to check if headers are compatible
             clean_assert(im_height == header_record['height'].numpy(), _cleanup_files)
             clean_assert(im_width == header_record['width'].numpy(), _cleanup_files)
             clean_assert(im_channels == header_record['channels'].numpy(), _cleanup_files)
-        # compute information necessarry for further computation
-        num_images       = header_record['num_images'].numpy()
-        num_observations = num_images - (_t_inputs - 1)
-        num_obs.append(num_observations)
         del ds_header
         del header_record
         print(" done")
@@ -625,13 +628,14 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _im_shape_conf, _t_inputs, _t0, _t1
 
     # print info about dataset
     print("[INFO] information about {}: ".format(_dataset_name))
-    print("\timage shape           : {}".format(image_shape))
-    print("\tsequence length       : {}".format(_t_inputs))
-    print("\tinfere pose from (t0) : {}".format(_t0))
-    print("\tinfere pose till (t1) : {}".format(_t1))
-    print("\tnumber observations   : {}".format(num_obs_total))
-    print("\tlabel format          : {}".format('(tx, ty, tz, roll, pitch, yaw)'))
-    print("\tDNN input layer names : {}".format(layernames))
+    print("\timage shape training     : {}".format(_train_shape_conf))
+    print("\timage shape original     : {}".format(_orig_shape_conf))
+    print("\tsequence length          : {}".format(_t_inputs))
+    print("\tinfere pose from (t0)    : {}".format(_t0))
+    print("\tinfere pose till (t1)    : {}".format(_t1))
+    print("\tnumber observations      : {}".format(num_obs_total))
+    print("\tlabel format             : {}".format('(tx, ty, tz, roll, pitch, yaw)'))
+    print("\tDNN input layer names    : {}".format(layernames))
 
     ## data to return
     # meta-information about dataset extracted from header -> will be used for checking compatability with validation ds and NN
@@ -672,7 +676,7 @@ conf = config.Config(args.config)
 
 # make trainaing dataset from tfrec
 print("[INFO] training dataset will be generated from following files:", conf.training_files)
-ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.image_shape, conf.input_timesteps,\
+ds_train, train_ds_info, train_ds_meta = tfrec_to_ds(conf.training_files, args.unpack_to, conf.training_shape, conf.original_shape, conf.input_timesteps,\
                                                      conf.t0, conf.t1, "training dataset", [],\
                                                      conf.subsequence_len, conf.subsequence_shift, conf.debug)
 num_train_obs  = train_ds_info[0]; layernames = train_ds_info[1];
@@ -688,7 +692,9 @@ if conf.validation_files == []:
         # case: no validation files and no validation split set
         print("[INFO] no validation files and split set, no validation data will be used during training")
         use_validation_data = False
+        ds_valid = None
         train_dataset_length = num_train_obs
+        valid_dataset_length = 0
     else:
         # case: no validation files but validation split set
         print("[INFO] no validation files set, validation-split fraction will be used instead (frac: {})".format(conf.validation_split))
@@ -701,8 +707,8 @@ if conf.validation_files == []:
 else:
     # case: validation files set
     print("[INFO] validation data is set, validation dataset will be generated from following files:", conf.validation_files)
-    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.image_shape, conf.input_timesteps, conf.t0, conf.t1,\
-                                                         "validation dataset", cleanup_files, conf.subsequence_len, conf.subsequence_shift, conf.debug)
+    ds_valid, valid_ds_info, valid_ds_meta = tfrec_to_ds(conf.validation_files, args.unpack_to, conf.training_shape, conf.original_shape, conf.input_timesteps,\
+                                                         conf.t0, conf.t1, "validation dataset", cleanup_files, conf.subsequence_len, conf.subsequence_shift, conf.debug)
     num_valid_obs = valid_ds_info[0]; valid_layernames = valid_ds_info[1];
     cleanup_files = valid_ds_meta[0]; valid_label_list_dbg = valid_ds_meta[1];
     # assert: check if layernames are consistent with the ones from ds_train
@@ -713,13 +719,9 @@ else:
 ## setup dataset pipeline
 # NOTE pipeline info: 1) observations are split into training and validation sets 1.5) validation set will be cached in local mem since it is small enough 2) sets are mapped to preprocess function in parallel 3) sets are batched and repeated 4) sets will be prefetched
 print("[INFO] setting up dataset pipeline (i.e. shuffling, batching, etc)...", end='', flush=True)
-# shuffle observations
 use_subsequencing = conf.subsequence_len > 0
-if not use_validation_data:
-    # train on all observations
-    ds_train = setup_dataset_pipeline(ds_train, conf, min(train_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
-else:
-    ds_train = setup_dataset_pipeline(ds_train, conf, min(train_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
+ds_train = setup_dataset_pipeline(ds_train, conf, min(train_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
+if use_validation_data:
     ds_valid = setup_dataset_pipeline(ds_valid, conf, min(valid_dataset_length, conf.max_shuffle_buf), debug=conf.debug, subsequencing=use_subsequencing)
 print(" done")
 print("[INFO] final tf.data.Dataset format: {}".format(ds_train))
@@ -754,33 +756,23 @@ tb_logger = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(conf.log_dir, 't
 csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(conf.log_dir, 'csv', 'training.log'))
 # setup training checkpointing NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
 timestamp_file = str(int(time.time()))
-cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}.ckpt')
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, verbose=1, save_freq=conf.checkpoint_freq)
-# TODO check usefull options: mode, save_best_only
+cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}_val_loss-{val_loss:.5f}.ckpt')
+checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_only_best=True, save_weights_only=True, save_freq=conf.checkpoint_freq)
 # TODO use learningRateScheduler callback
 
 ## train model using keras training loop
-if not use_validation_data:
-    history = model.fit(
-        ds_train,
-        steps_per_epoch=train_dataset_length/conf.batch_size,
-        epochs=conf.epoches,
-        callbacks=[csv_logger, tb_logger, checkpoint_callback],
-        shuffle=False, # NOTE td.data.Dataset will take care about shuffling
-        )
-else:
-    history = model.fit(
-        ds_train,
-        validation_data=ds_valid,
-        validation_steps=valid_dataset_length/conf.batch_size,
-        steps_per_epoch=train_dataset_length/conf.batch_size,
-        epochs=conf.epoches,
-        callbacks=[csv_logger, tb_logger, checkpoint_callback],
-        shuffle=False, # NOTE td.data.Dataset will take care about shuffling
-        )
+history = model.fit(
+                    ds_train,
+                    steps_per_epoch=train_dataset_length/conf.batch_size,
+                    epochs=conf.epoches,
+                    validation_data=ds_valid,
+                    validation_steps=valid_dataset_length/conf.batch_size,
+                    callbacks=[csv_logger, tb_logger, checkpoint_callback],
+                    shuffle=False, # NOTE tf.data.Dataset pipeline will take care about shuffling
+                   )
 
 # save final model
-print("[INFO] training done, final model is saved at '{}'".format(conf.model_out))
+print("[INFO] training done! Final model is saved at '{}', model with best val_loss is saved in checkpoint directory".format(conf.model_out))
 model.save(conf.model_out)
 
 print("[INFO] training loss history:")
