@@ -630,7 +630,9 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _train_shape_conf, _orig_shape_conf
     print("[INFO] information about {}: ".format(_dataset_name))
     print("\timage shape training     : {}".format(_train_shape_conf))
     print("\timage shape original     : {}".format(_orig_shape_conf))
-    print("\tsequence length          : {}".format(_t_inputs))
+    print("\tsubsequence length       : {}".format(_subseq_len))
+    print("\tsubsequence shift        : {}".format(_subseq_shift))
+    print("\tinput timesteps          : {}".format(_t_inputs))
     print("\tinfere pose from (t0)    : {}".format(_t0))
     print("\tinfere pose till (t1)    : {}".format(_t1))
     print("\tnumber observations      : {}".format(num_obs_total))
@@ -646,17 +648,15 @@ def tfrec_to_ds(_dataset_files, _unpack_dir, _train_shape_conf, _orig_shape_conf
     # final concatenated dataset: on next() it will return a 2-tuple contaning 1) a n-tuple of n input images and 2) the appropriate label
     return ds_final, info, clean_dbg_stuff
 
-# TODO play around with tf.contrib.data functions to make pipeline more effective -> read https://www.tensorflow.org/tutorials/load_data/images#performance
+# TODO play around with tf.contrib.data functions to make pipeline more efficient -> read https://www.tensorflow.org/tutorials/load_data/images#performance
 def setup_dataset_pipeline(ds, conf, shuffle_buf_len, debug=False, subsequencing=False):
-    # NOTE 1) shuffle dataset, 2) cache data in memory, 3) map compatability function, 4) batch dataset 5) repeat dataset infinitly, 6) make dataset prefetchable
     if debug and not subsequencing: # prepare pipeline for visualization of non-subsequenced dataset
-        ds = ds.shuffle(shuffle_buf_len).cache().map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+        ds = ds.shuffle(shuffle_buf_len).map(make_debug_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
             .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     elif subsequencing: # prepare pipeline for training on subsequenced dataset OR for visualization of subsequenced dataset (if debug=True)
-        ds = ds.shuffle(shuffle_buf_len).cache()\
-                .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
+        ds = ds.shuffle(shuffle_buf_len).batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     else: # prepare pipeline for training on non-subsequenced dataset
-        ds = ds.shuffle(shuffle_buf_len).cache().map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+        ds = ds.shuffle(shuffle_buf_len).map(make_keras_compatible, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
                 .batch(conf.batch_size).repeat().prefetch(tf.data.experimental.AUTOTUNE)
     return ds
 
@@ -756,8 +756,14 @@ tb_logger = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(conf.log_dir, 't
 csv_logger = tf.keras.callbacks.CSVLogger(os.path.join(conf.log_dir, 'csv', 'training.log'))
 # setup training checkpointing NOTE infos at https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint
 timestamp_file = str(int(time.time()))
-cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}_val_loss-{val_loss:.5f}.ckpt')
-checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_only_best=True, save_weights_only=True, save_freq=conf.checkpoint_freq)
+if not conf.checkpoint_stat or conf.checkpoint_stat != 'None':
+    cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}_'+conf.checkpoint_stat+'-{'+conf.checkpoint_stat+':.5f}.ckpt')
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_best_only=True, save_weights_only=True,
+                                                             monitor=conf.checkpoint_stat, save_freq=conf.checkpoint_freq)
+else:
+    cpkt_filename = os.path.join(conf.checkpoint_dir, 'ckpt-'+timestamp_file+'-{epoch:05d}.ckpt')
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=cpkt_filename, save_weights_only=True, save_freq=conf.checkpoint_freq)
+callbacks = [tb_logger, csv_logger, checkpoint_callback]
 # TODO use learningRateScheduler callback
 
 ## train model using keras training loop
@@ -767,8 +773,8 @@ history = model.fit(
                     epochs=conf.epoches,
                     validation_data=ds_valid,
                     validation_steps=valid_dataset_length/conf.batch_size,
-                    callbacks=[csv_logger, tb_logger, checkpoint_callback],
-                    shuffle=False, # NOTE tf.data.Dataset pipeline will take care about shuffling
+                    callbacks=callbacks,
+                    shuffle=False # NOTE tf.data.Dataset pipeline will take care about shuffling
                    )
 
 # save final model
