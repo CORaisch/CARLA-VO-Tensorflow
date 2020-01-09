@@ -42,10 +42,10 @@ def create_model(layernames, image_shape):
     for layername in layernames:
         input_layer   = tf.keras.layers.Input(shape=image_shape, name=layername)
         input_layers.append(input_layer)
-        flatten_layer = tf.keras.layers.Flatten()(input_layer)
+        flatten_layer = tf.keras.layers.Flatten(data_format='channels_last')(input_layer)
         flatten_layers.append(flatten_layer)
     # concatenate output of all input layers to one flat tensor
-    x = tf.keras.layers.concatenate(inputs=flatten_layers)
+    x = tf.keras.layers.concatenate(flatten_layers)
     # make mlp with 6 outpus for the 6 dof poses
     mid = tf.keras.layers.Dense(1000, activation='relu')(x)
     out = tf.keras.layers.Dense(6, activation='linear')(mid)
@@ -61,13 +61,15 @@ def main():
     # make header for the DNN
     layernames = make_layernames(conf.training_files[0], conf.input_timesteps)
     # create and compile model
-    model = create_model(layernames, conf.image_shape)
+    print("[INFO] information about generated DNN model:")
+    model = create_model(layernames, conf.training_shape)
+    model.summary(line_length=150)
     # write model to disk
     name = 'simple_flat__in' + str(len(layernames)) \
              + '_tInputs'     + str(conf.input_timesteps) \
-             + '_imw'        + str(conf.image_shape[0]) \
-             + '_imh'        + str(conf.image_shape[1]) \
-             + '_imc'        + str(conf.image_shape[2]) \
+             + '_imw'        + str(conf.training_shape[0]) \
+             + '_imh'        + str(conf.training_shape[1]) \
+             + '_imc'        + str(conf.training_shape[2]) \
              + '_out6'       + '.h5'
     model.save(os.path.join(args.model_out, name))
 
