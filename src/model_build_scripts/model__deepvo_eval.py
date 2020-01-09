@@ -106,7 +106,7 @@ def main():
     # make header for the DNN
     layernames = make_layernames(conf.training_files[0], conf.input_timesteps)
     # create and compile model
-    model = create_model(layernames, conf.image_shape)
+    model = create_model(layernames, conf.training_shape)
     # load trained weights
     trained_model = tf.keras.models.load_model(args.trained_model_file, compile=False)
     model.set_weights(trained_model.get_weights())

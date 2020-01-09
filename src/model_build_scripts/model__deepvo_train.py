@@ -108,14 +108,14 @@ def main():
     # make header for the DNN
     layernames = make_layernames(conf.training_files[0], conf.input_timesteps)
     # create and compile model
-    model = create_model(layernames, conf.image_shape)
+    model = create_model(layernames, conf.training_shape)
     # write model to disk
     name = 'deepvo__train__'\
              + 'in'       + str(len(layernames)) \
              + '_tInputs' + str(conf.input_timesteps) \
-             + '_imw'     + str(conf.image_shape[0]) \
-             + '_imh'     + str(conf.image_shape[1]) \
-             + '_imc'     + str(conf.image_shape[2]) \
+             + '_imw'     + str(conf.training_shape[0]) \
+             + '_imh'     + str(conf.training_shape[1]) \
+             + '_imc'     + str(conf.training_shape[2]) \
              + '_out6.h5'
     model.save(os.path.join(args.model_out, name))
     # print final model
